@@ -1,7 +1,13 @@
 #include "sys/types.h"
+#ifdef _AIX
+#include "../ide.h"
+#else
 #include "sys/conf.h"
 #include "sys/ide.h"
+#endif
 #include "config.h"
+
+#ifndef _AIX
 
 #define ATAMAJOR0       ATA_CMAJOR_0    /* Board major device number */
 
@@ -9,6 +15,10 @@ int	ata_major = ATAMAJOR0;		/* major device number */
 
 /* Exported globals expected by SVR4 */
 int 	atadevflag = D_NEW | D_DMA;
+
+#endif
+
+
 int	atadebug   = 0;
 int 	ata_intr_mode = 1;
 int 	atapi_intr_mode = 1;

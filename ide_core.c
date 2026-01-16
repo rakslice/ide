@@ -61,7 +61,14 @@ ataopen(dev_t *devp, int flags, int otyp, cred_t *crp)
 		ac->tmo_id	= 0;
 	}
 	
-	AC_CLR_FLAG(ac,ACF_CLOSING); 
+	AC_CLR_FLAG(ac,ACF_CLOSING);
+
+	if (q->open_count == 0 && U_HAS_FLAG(u,UF_ATAPI) && U_HAS_FLAG(u,UF_REMOVABLE)) {
+		// TODO check sense?
+		printf("ata: updating media status\n");
+		(void)atapi_test_unit_ready(ac, drive);
+	}
+
 	splx(s);
 
 	if (U_HAS_FLAG(u,UF_ATAPI)) {
@@ -152,15 +159,22 @@ ataclose(dev_t dev, int flags, int otyp, cred_t *crp)
 
 }
 
+#ifndef _AIX
 void
 atabreakup(struct buf *bp)
 {
 	pio_breakup(atastrategy, bp, MAXNBLKS);
 }
+#endif
 
 int
 atastrategy(struct buf *bp)
 {
+	if (bp == NULL) {
+		printf("atastrategy: bp == NULL\n");
+		return -1;
+	}
+
 	int	dev=bp->b_edev, is_wr, s, do_kick;
 	ata_ctrl_t *ac = &ata_ctrl[ATA_CTRL(dev)];
 	ata_unit_t *u = ac->drive[ATA_DRIVE(dev)];
@@ -224,17 +238,14 @@ atastrategy(struct buf *bp)
 	return 0;
 }
 
-int
-ataread(dev_t dev, struct uio *uiop, cred_t *crp)
-{
+daddr_t maxb_for_dev(dev_t dev) {
+
 	int 	fdisk = ATA_PART(dev),
 		slice = ATA_SLICE(dev);
 	ata_unit_t *u = &ata_unit[ATA_UNIT(dev)];
 	daddr_t	maxb;
 	u32_t	blksz;
 	u32_t	bsz512;
-
-	ATADEBUG(1,"ataread(%s)\n",Dstr(dev));
 
 	/*
 	 * Raw ATAPI devices (e.g. ZIP) may not have a valid VTOC/slice.
@@ -248,46 +259,74 @@ ataread(dev_t dev, struct uio *uiop, cred_t *crp)
 	} else {
 		maxb = (daddr_t)(u->fd[fdisk].slice[slice].p_size);
 	}
+	return maxb;
+}
 
+#ifdef _AIX
+
+/* BSD-style minphys takes a struct buf * and adjusts its b_bcount */
+void ata_minphys(struct buf *bp) {
+	if (bp) {
+		daddr_t maxb = maxb_for_dev(bp->b_dev);
+		if (bp->b_bcount > maxb) {
+			bp->b_bcount = maxb;
+		}
+	} else {
+		printf("ata: ata_minphys(bp == NULL)\n");
+	}
+
+	minphys(bp); /* regular system minphys */
+}
+
+/* A buf for raw device i/o */
+struct buf atabuf;
+
+#endif
+
+int
+ataread(dev_t dev, struct uio *uiop, cred_t *crp)
+{
+	ATADEBUG(1,"ataread(%s)\n",Dstr(dev));
+
+	//printf("ata: info about this read: base 0x%x count %d icount %d offset 0x%x\n", u.u_base, u.u_count, u.u_icount, u.u_offset);
+
+	//printf("ata: about to physio uiop=0x%x\n", uiop);
+
+#ifndef _AIX
 	return physiock(atabreakup, 
 			NULL, 
 			dev, 
 			B_READ, 
-			maxb,
+			maxb_for_dev(dev),
 			uiop);
+#else
+	return physio(atastrategy,
+			&atabuf,
+			dev,
+			B_READ,
+			ata_minphys);
+#endif
 }
 
 int
 atawrite(dev_t dev, struct uio *uiop, cred_t *crp)
 {
-	int 	fdisk = ATA_PART(dev),
-		slice = ATA_SLICE(dev);
-	ata_unit_t *u = &ata_unit[ATA_UNIT(dev)];
-	daddr_t	maxb;
-	u32_t	blksz;
-	u32_t	bsz512;
-
 	ATADEBUG(1,"atawrite(%s)\n",Dstr(dev));
 
-	/*
-	 * Raw ATAPI devices (e.g. ZIP) may not have a valid VTOC/slice.
-	 * For such devices, bound physiock() by the discovered media size.
-	 */
-	if (U_HAS_FLAG(u,UF_ATAPI)) {
-		blksz = u->atapi_blksz ? u->atapi_blksz : 2048;
-		bsz512 = blksz >> 9;
-		if (bsz512 == 0) bsz512 = 1;
-		maxb = (daddr_t)(u->atapi_blocks * bsz512);
-	} else {
-		maxb = (daddr_t)(u->fd[fdisk].slice[slice].p_size);
-	}
-
+#ifndef _AIX
 	return physiock(atabreakup, 
 			NULL, 
 			dev, 
 			B_WRITE, 
-			maxb,
+			maxb_for_dev(dev),
 			uiop);
+#else
+	return physio(atastrategy,
+			&atabuf,
+			dev,
+			B_WRITE,
+			ata_minphys);
+#endif
 }
 
 int
@@ -304,6 +343,7 @@ ataioctl(dev_t dev, int cmd, caddr_t arg, int mode, cred_t *crp, int *rvalp)
 	if (!U_HAS_FLAG(u,UF_PRESENT)) return ENODEV;
 
 	switch (cmd) {
+#ifndef _AIX
 	case V_CONFIG: 		/* VIOC | 0x01 */
 		return 0;
 
@@ -417,6 +457,43 @@ ataioctl(dev_t dev, int cmd, caddr_t arg, int mode, cred_t *crp, int *rvalp)
 		if (copyout((caddr_t)&gt,arg,sizeof(gt)) != 0) return EFAULT;
 		return 0;
 	    }
+#endif
+
+#ifdef _AIX
+	case IOCTYPE: {
+		if (!arg) return EFAULT;
+
+		if (U_HAS_FLAG(u,UF_CDROM)) {
+			return DD_CDROM;
+		} else {
+			return DD_DISK;
+		}
+	}
+
+	case IOCINFO: {
+		struct devinfo * dp = (struct devinfo *)arg;
+
+		if (!arg) return EFAULT;
+
+		if (U_HAS_FLAG(u,UF_CDROM)) {
+			dp->devtype = DD_CDROM;
+			dp->un.dk.trkpcyl = 1;
+			dp->un.dk.secptrk = 2048;
+		} else {
+			dp->devtype = DD_DISK;
+			dp->un.dk.trkpcyl = 16; // aka heads
+			dp->un.dk.secptrk = 63;
+		}
+		dp->flags = DF_RAND | DF_FAST | DF_SCSI;
+		if (!U_HAS_FLAG(u,UF_REMOVABLE)) {
+			dp->flags |= DF_FIXED;
+		}
+		dp->un.dk.bytpsec = DEV_BSIZE;
+		dp->un.dk.numblks = u->nsectors;
+		printf("ata: ioctl success\n");
+		return 0;
+	}
+#endif
 
 	/* --- Private ATAPI CD-ROM TOC / audio controls --- */
 	case CDIOC_READTOC: {
@@ -568,7 +645,7 @@ atainit(void)
 	ATADEBUG(1,"atainit()\n");
 
 	/*** Hack - we mustn't run before bio subsystem has initialised ***/
-	if (bfreelist.av_forw == NULL) binit();
+	if (BFREELIST_FIRST.av_forw == NULL) binit();
 
 	bzero((caddr_t)&ata_unit[0],sizeof(ata_unit_t)*ATA_MAX_UNITS);
 	for (ctrl = 0; ctrl < ATA_MAX_CTRL; ctrl++) {
@@ -648,7 +725,7 @@ ataintr(int irq)
 	st=inb(ATA_STATUS_O(ac)); /* ataintr() */
  	err=(st & (ATA_SR_ERR|ATA_SR_DWF)) ? inb(ATA_ERROR_O(ac)) : 0;
 	if (err) {
-		printf("Drive ERR:DWF\n");
+		printf("Drive ERR:DWF, r=0x%x  st %d dwf %d\n", r, st & ATA_SR_ERR != 0, st & ATA_SR_DWF != 0);
 	}
 
 	if (!AC_HAS_FLAG(ac, ACF_INTR_MODE)) {

@@ -5,25 +5,37 @@
 #ifndef _IDE_HW_H
 #define _IDE_HW_H
 
+#ifndef _AIX
+#endif
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/buf.h>
+#ifndef _AIX
 #include <sys/kmem.h>
+#endif
 #include <sys/uio.h>
 #include <sys/file.h>
+#ifndef _AIX
 #include <sys/cred.h>
+#endif
 #include <sys/conf.h>
+#ifndef _AIX
 #include <sys/ddi.h>
 #include <sys/ipl.h>
+#endif
 #include <sys/systm.h>
 #include <sys/errno.h>
+#ifndef _AIX
 #include <sys/vtoc.h>
+#endif
 #include <sys/inline.h>
 #include <sys/param.h>
+#ifndef _AIX
 #include <sys/fdisk.h>
 #include <sys/mkdev.h>
 #include <sys/xdebug.h>
 #include <sys/kdebugger.h>
+#endif
 
 /* Choose PIO Multiple policy: 1=max drive-supported, 0=cap at 8 */
 #define ATA_USE_MAX_MULTIPLE 1

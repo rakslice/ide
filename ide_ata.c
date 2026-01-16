@@ -360,7 +360,7 @@ ata_rescueit(ata_ctrl_t *ac)
 	if (!q || !q->cur) { splx(s); return; }
 
 	if (ac->tmo_id) {
-		untimeout(ac->tmo_id);
+		cancel_timeout(ac->tmo_id);
 		ac->tmo_id = 0;
 	}
 	splx(s);
@@ -612,11 +612,11 @@ ata_request(ata_ctrl_t *ac,ata_req_t *r,int arm_ticks)
 	caddr_t	user_ptr;
 
 	ATADEBUG(2,"ata_request(Reqid=%ld)\n",r ? r->reqid : 0);
-	if (!r) return;
+	if (!r) return 0;
 
 	if (AC_HAS_FLAG(ac,ACF_INTR_MODE)) {
 		n = (r->sectors_left > 256U) ? 256U : r->sectors_left;
-		if (n == 0) return;
+		if (n == 0) return 0;
 
 		/* Cap sectors to bounce-buffer capacity in interrupt mode */
 		if (q->xfer_buf) {
@@ -626,7 +626,7 @@ ata_request(ata_ctrl_t *ac,ata_req_t *r,int arm_ticks)
 	} else {
 		n = r->sectors_left;
 		if (n > (u32_t)u->pio_multi) n = (u32_t)u->pio_multi;
-		if (n == 0) return;
+		if (n == 0) return 0;
 		/* POLL mode: allow multi-sector PIO up to u->pio_multi */
 	}
 
@@ -754,7 +754,7 @@ if (bp) {
 		else     bok(bp,resid);
 	}
 
-	if (r) kmem_free(r,sizeof(*r));
+	if (r) kmem_free((caddr_t)r,sizeof(*r));
 	AC_SET_FLAG(ac,ACF_PENDING_KICK);
 }
 

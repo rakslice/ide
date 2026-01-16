@@ -544,7 +544,7 @@ atapi_send_cdb(ata_ctrl_t *ac, u8_t *cdb, int cdb_len, int where)
 		return;
 	}
 
-	outsw(ATA_DATA_O(ac),cdb,(cdb_len+1)>>1);
+	outsw(ATA_DATA_O(ac),(u16_t *)cdb,(cdb_len+1)>>1);
 	drv_usecwait(40);
 }
 

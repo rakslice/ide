@@ -23,27 +23,148 @@
 #ifndef _IDE_H
 #define _IDE_H
 
+#ifndef _AIX
+#endif
+
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/buf.h>
+#ifndef _AIX
 #include <sys/kmem.h>
+#endif
 #include <sys/uio.h>
 #include <sys/file.h>
+#ifndef _AIX
 #include <sys/cred.h>
+#endif
 #include <sys/conf.h>
+#ifndef _AIX
 #include <sys/ddi.h>
 #include <sys/ipl.h>
+#endif
 #include <sys/systm.h>
 #include <sys/errno.h>
+#ifndef _AIX
 #include <sys/vtoc.h>
+#endif
 #include <sys/inline.h>
 #include <sys/param.h>
+#ifndef _AIX
 #include <sys/fdisk.h>
 #include <sys/mkdev.h>
 #include <sys/xdebug.h>
 #include <sys/kdebugger.h>
+#endif
 #include <sys/user.h>
+#ifndef _AIX
 #include <sys/cmn_err.h>
+#endif
+
+#ifdef _AIX
+/* basic type constants used elsewhere here */
+
+typedef unsigned char u8_t;
+typedef unsigned short u16_t;
+typedef unsigned int u32_t;
+
+typedef unsigned long ulong_t;
+
+/* we're setting this up to match our struct hdpart with different var names */
+struct partition {
+	daddr_t p_start;
+	daddr_t p_size;
+	u_short p_tag;
+	u_short p_flag;
+};
+
+typedef struct ucred cred_t;
+
+#include <sys/vmalloc.h>
+
+/* we also tack on other useful consts */
+#define KM_SLEEP (MA_OK2SLEEP | MA_LONGTERM)
+
+/* sys/buf.h */
+#define b_edev b_dev
+
+typedef struct buf buf_t;
+
+/* sys/minidisk.h */
+/** TODO we'll have to revisit this as there are two, for now the one where the vtoc lives */
+#define SI_AIX_BOOT	8	/* AIX partition containing VTOC */
+#define UNIXOS SI_AIX_BOOT
+
+#define VTOC_SEC 3
+
+#define V_CONFIG IOCCONFIG
+
+#include <sys/ioctl.h>
+
+#include <sys/devinfo.h>
+
+/* svr4 fdisk.h style partition/vtable defines */
+
+/*
+ * structure to hold the fdisk partition table
+ */
+struct ipart {
+	unsigned char bootid;	/* bootable or not */
+	unsigned char beghead;	/* beginning head, sector, cylinder */
+	unsigned char begsect;	/* begcyl is a 10-bit number. High 2 bits */
+	unsigned char begcyl;	/*     are in begsect. */
+	unsigned char systid;	/* OS type */
+	unsigned char endhead;	/* ending head, sector, cylinder */
+	unsigned char endsect;	/* endcyl is a 10-bit number.  High 2 bits */
+	unsigned char endcyl;	/*     are in endsect. */
+	long    relsect;	/* first sector relative to start of disk */
+	long    numsect;	/* number of sectors in partition */
+};
+
+#define BOOTSZ		446	/* size of boot code in master boot block */
+#define FD_NUMPART	4	/* number of 'partitions' in fdisk table */
+#define MBB_MAGIC	0xAA55	/* magic number for mboot.signature */
+
+struct  mboot {     /* master boot block */
+	char    bootinst[BOOTSZ];
+	char    parts[FD_NUMPART * sizeof(struct ipart)];
+	ushort   signature;
+};
+
+#define PCIXOS		2	/* PC/IX partition */
+#define EXTDOS SI_EXT_DOS
+#define DOSDATA		86	/* DOS data partition */
+#define OTHEROS		98	/* part. type for appl. (DB?) needs raw partition */
+				/* ID was 0 but conflicted with DOS 3.3 fdisk    */
+#define UNUSED		100	/* unassigned partition */
+
+#define CE_CONT 0
+#define CE_NOTE 1
+#define CE_WARN 2
+#define CE_PANIC 3
+
+#include "aix_svr4_shims.h"
+
+#endif /* aix */
+
+#ifdef _AIX
+	/* multiple bfreelist */
+	#define BFREELIST_FIRST (bfreelist[BQ_LOCKED])
+
+#else
+	/* bfreelist is a linked list */
+	#define BFREELIST_FIRST (bfreelist)
+#endif
+
+#ifdef _AIX
+	#define setup_timeout(func, arg, ticks)	ctimeout(func, arg, ticks);
+	#define cancel_timeout(id)				to_cancel(id)
+	#define finish_timeout(id)				to_cancel(id)
+#else
+	#define setup_timeout(func, arg, ticks)	timeout(func, arg, ticks);
+	#define cancel_timeout(id)				untimeout(id)
+	#define finish_timeout(id)
+#endif
+
 
 #ifndef TRUE
 #define TRUE 	1
@@ -131,7 +252,11 @@
 
 #define DDI_INTR_UNCLAIMED	0
 #define DDI_INTR_CLAIMED	1
+#ifdef _AIX
+#define	splbio	splblkio
+#else
 #define	splbio	spl5
+#endif
 
 #define insw(port,addr,count)	linw(port,addr,count)
 #define outsw(port,addr,count)	loutw(port,addr,count)

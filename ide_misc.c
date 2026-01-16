@@ -1,14 +1,20 @@
 #include "ide.h"
 #include <stdarg.h>
+#ifdef _AIX
+#include <i386/intr86.h>
+#else
 #include <sys/cmn_err.h>
+#endif
 
 extern void ata_service_irq(ata_ctrl_t *ac, ata_req_t *r, u8_t st);
 
 #define BS	0x08
 
+#ifndef _AIX
 extern char 	putbuf[];
 extern int	putbufsz;
 extern int	putbufndx;
+#endif
 extern int	ata_debug_console;
 extern short	prt_where;
 
@@ -17,6 +23,9 @@ extern void dbg_putchar(int);
 
 u32_t	req_seq=0;
 
+#ifdef _AIX
+void ATADEBUG(int lvl, char *fmt, ...);
+#else
 void
 ATADEBUG(int lvl, char *fmt, ...) 
 {
@@ -62,7 +71,20 @@ ATADEBUG(int lvl, char *fmt, ...)
 	if (ata_debug_console)
 		printf("%s", buf);
 }
+#endif
 
+#ifdef _AIX
+#include <sys/minidisk.h>
+#undef drive
+void
+CopyTbl(ata_part_t *fp,struct _partition *ipart)
+{
+	fp->active   = ipart->IPL_ind;
+	fp->base_lba = (((u32_t)ipart->rel_sect_h) << 16) | (u32_t)ipart->rel_sect_l;
+	fp->nsectors = (((u32_t)ipart->num_sect_h) << 16) | (u32_t)ipart->num_sect_l;
+	fp->systid   = (int)ipart->system_ind;
+}
+#else
 void
 CopyTbl(ata_part_t *fp,struct ipart *ipart)
 {
@@ -71,6 +93,7 @@ CopyTbl(ata_part_t *fp,struct ipart *ipart)
 	fp->nsectors = (u32_t)ipart->numsect;
 	fp->systid   = (int)ipart->systid;
 }
+#endif
 
 char *
 getstr(char *ptr, int len, int swap, int blanks,int stop)
@@ -130,6 +153,10 @@ Istr(int cmd)
 {
 	switch (cmd) {
 	case V_CONFIG:	 return "V_CONFIG";
+#ifdef _AIX
+	case IOCTYPE:	 return "IOCTYPE";
+	case IOCINFO:	 return "IOCINFO";
+#else
 	case V_REMOUNT:  return "V_REMOUNT";
 	case V_GETPARMS: return "V_GETPARMS";
 	case V_FORMAT: 	 return "V_FORMAT";
@@ -137,6 +164,7 @@ Istr(int cmd)
 	case V_RDABS: 	 return "V_RDABS";
 	case V_WRABS:	 return "V_WRABS";
 	case V_VERIFY:	 return "V_VERIFY";
+#endif
 	case CDIOC_READTOC: return "CDIOC_READTOC";
 	case CDIOC_PLAYMSF: return "CDIOC_PLAYMSF";
 	default:	 return "V_default";
@@ -150,7 +178,7 @@ reset_queue(ata_ctrl_t *ac,int hard)
 
 	ATADEBUG(2,"reset_queue()\n");
 	if (ac->tmo_id) {
-    		untimeout(ac->tmo_id);
+			cancel_timeout(ac->tmo_id);
     		ac->tmo_id = 0;
 	}
 	/* Soft reset of the channel engine; do NOT free xfer_buf here. */
@@ -170,7 +198,11 @@ ata_attach(int ctrl)
 	if (!AC_HAS_FLAG(ac,ACF_PRESENT)) return;
 
 	if (ata_intr_mode || atapi_intr_mode) {
+#ifdef _AIX
+		intrattach(&ataintr, ac->irq, SPL_BLKIO);
+#else
 		RegisterIRQ(ac->irq,&ataintr, SPL5, INTR_TRIGGER_EDGE);
+#endif
 		AC_SET_FLAG(ac,ACF_INTR_MODE);
 	}
 	if (ata_intr_mode) printf("ATA in intr mode\n");
@@ -197,8 +229,12 @@ ata_read_vtoc(dev_t dev,int part)
 	ata_unit_t *u=ac->drive[drive];
 	u32_t 	base, lba, off;
 	caddr_t k = 0;
+#ifdef _AIX
+	VTOC1_3 * aix_vtocs;
+#else
 	struct pdinfo *pd;
 	struct vtoc *v;
+#endif
 	ata_part_t *fp = &u->fd[part];
 	int 	s;
 	int rootu = ATA_DEV_UNIT(dev);
@@ -209,20 +245,57 @@ ata_read_vtoc(dev_t dev,int part)
 
 	if (U_HAS_FLAG(u,UF_ATAPI)) return 0;
 
+	printf("ata: ataopen\n");
+
 	/* Only attempt on UNIX partitions with a size. */
 	if (fp->systid != UNIXOS || fp->nsectors == 0) return 0;
+
+	printf("ata: found partition that should have vtoc\n");
 
 	base = fp->base_lba;
 
 	/* pdinfo + vtoc live in the same sector at (unix_base + VTOC_SEC). */
 	lba = base + (u32_t)VTOC_SEC;
-	if (!(k = kmem_alloc(DEV_BSIZE, KM_SLEEP))) return 0;
+	printf("ata: reading lba %d\n", lba);
+	if (!(k = (caddr_t) kmem_alloc(DEV_BSIZE, KM_SLEEP))) return 0;
 
         if (ata_getblock(ABSDEV(dev),lba,(caddr_t)k,DEV_BSIZE) != 0) {
 		kmem_free(k, DEV_BSIZE);
 		return EIO;
 	}
 
+#ifdef _AIX
+	printf("ata: checking for vtoc magic\n");
+	aix_vtocs = (VTOC1_3 *)k;
+	for (int i = 0; i<MAGIC_LENGTH; i++) {
+		if (aix_vtocs->vtoc1.magic_string[i] != MAGIC_STRING[i]) {
+			// FIMXE adjust to free the relevant read
+			printf("ata: not found\n");
+			kmem_free(k, DEV_BSIZE);
+			return 0;
+		}
+	}
+	printf("ata: ok\n");
+
+	// FIXME do we have the rest of the sectors already?
+
+	/* Copy slices from vtoc into our driver table. */
+	for (s = 0; s < MAX_MINIDISKS; ++s) {
+		// FIXME check for terminator
+		fp->slice[s].p_tag = aix_vtocs->vtoc1.mini[s].type; //v->v_part[s].p_tag;
+		// FIXME what flags
+		fp->slice[s].p_flag = 0; //v->v_part[s].p_flag;
+		fp->slice[s].p_start = aix_vtocs->vtoc1.mini[s].s_block; //v->v_part[s].p_start;
+		fp->slice[s].p_size  = aix_vtocs->vtoc1.mini[s].num_blks; // v->v_part[s].p_size;
+		if (fp->slice[s].p_tag == LT_AIX_PAGE /* V_SWAP */ /*&&*/
+		    /*fp->slice[s].p_flag & V_VALID */ ) {
+				if (swapdev != NODEV && rootu == swapu) {
+					nswap = fp->slice[s].p_size;
+				}
+			}
+	}
+
+#else
 	pd = (struct pdinfo *)k;
 	if (pd->sanity != VALID_PD || pd->version != 1) {
 		kmem_free(k, DEV_BSIZE);
@@ -258,6 +331,7 @@ ata_read_vtoc(dev_t dev,int part)
 				}
 			}
 	}
+#endif
 
 	/* Whole-fdisk pseudo-slice: full partition range. */
 	fp->slice[ATA_WHOLE_PART_SLICE].p_start = 0;
@@ -481,7 +555,7 @@ ata_pdinfo(dev_t dev)
 	for(i=0; i<FD_NUMPART; ip++) {
 		fp = &u->fd[ i ];
 		if (ip->systid == EMPTY) continue;
-		CopyTbl(fp,ip);
+		CopyTbl(fp,(struct _partition *)ip);
 		if (ip->systid == UNIXOS) {
 			fp->slice[ATA_WHOLE_PART_SLICE].p_start = 0;
 			fp->slice[ATA_WHOLE_PART_SLICE].p_size  = fp->nsectors;
@@ -733,6 +807,8 @@ ide_poll_engine(ata_ctrl_t *ac)
 void
 dump_putbuf(void)
 {
+	#ifndef _AIX
+
 	int	s;
 	int	ndx, sz;
 	int	start, n, i;
@@ -799,6 +875,7 @@ dump_putbuf(void)
 			}
 		}
 	}
+	#endif
 }
 
 char *
@@ -821,6 +898,10 @@ get_sysid(u8_t systid)
 	case OPENBSD:		return "OpenBSD";
 	case NETBSD:		return "NetBSD";
 	case SOLARIS:		return "Solaris";
+#ifdef _AIX
+	case SI_AIX_BOOT:	return "AIX Boot";
+	case SI_AIX_NOBOOT:	return "AIX No-Boot";
+#endif
 	}
 	return "??";
 }

@@ -12,11 +12,11 @@ ide_arm_watchdog(ata_ctrl_t *ac, int ticks)
 	if (ticks <= 0)
 		ticks = (ac->tmo_ticks ? ac->tmo_ticks : 2*HZ);
 	if (ac->tmo_id) {
-		untimeout(ac->tmo_id);
+		cancel_timeout(ac->tmo_id);
 		ac->tmo_id = 0;
 	}
 	BUMP(ac,wd_arm);
-	ac->tmo_id = timeout(ide_watchdog, (caddr_t)ac, ticks);
+	ac->tmo_id = setup_timeout(ide_watchdog, (caddr_t)ac, ticks);
 }
 
 void 
@@ -26,7 +26,7 @@ ide_cancel_watchdog(ata_ctrl_t *ac)
 
 	if (ac->tmo_id) {
 		BUMP(ac,wd_cancel);
-		untimeout(ac->tmo_id);
+		cancel_timeout(ac->tmo_id);
 		ac->tmo_id = 0;
 	}
 }
@@ -39,6 +39,8 @@ ide_watchdog(caddr_t arg)
 	ata_req_t   *r = q ? q->cur : NULL;
 	int	s, er, progress=0;
 	u8_t 	ast, err;
+
+	finish_timeout(ac->tmo_id);
 
 	ATADEBUG(3,"ide_watchdog(r=%08x chunk_left=%x sectors_left=%x)\n",
 		r, r ? r->chunk_left : -1, r ? r->sectors_left : -1);

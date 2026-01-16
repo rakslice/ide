@@ -8,22 +8,32 @@
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/buf.h>
+#ifndef _AIX
 #include <sys/kmem.h>
+#endif
 #include <sys/uio.h>
 #include <sys/file.h>
+#ifndef _AIX
 #include <sys/cred.h>
+#endif
 #include <sys/conf.h>
+#ifndef _AIX
 #include <sys/ddi.h>
 #include <sys/ipl.h>
+#endif
 #include <sys/systm.h>
 #include <sys/errno.h>
+#ifndef _AIX
 #include <sys/vtoc.h>
+#endif
 #include <sys/inline.h>
 #include <sys/param.h>
+#ifndef _AIX
 #include <sys/fdisk.h>
 #include <sys/mkdev.h>
 #include <sys/xdebug.h>
 #include <sys/kdebugger.h>
+#endif
 
 #include "ide.h"
 #include "ide_hw.h"
@@ -39,7 +49,9 @@ extern	u32_t req_seq;
 void 	ataprint(dev_t, char *);
 int 	ataopen(dev_t *, int, int, cred_t *);
 int 	ataclose(dev_t, int, int, cred_t *);
+#ifndef _AIX
 void 	atabreakup(struct buf *);
+#endif
 int 	atastrategy(struct buf *);
 int 	ataread(dev_t, struct uio *, cred_t *);
 int 	atawrite(dev_t, struct uio *, cred_t *);
@@ -132,7 +144,11 @@ void 	ata_copy_model(u16_t *, char *);
 int 	ata_read_signature(ata_ctrl_t *, u8_t, u16_t *);
 int 	ata_probe_unit(ata_ctrl_t *,u8_t);
 void 	ata_region_from_dev(dev_t, u32_t *, u32_t *);
+#ifdef _AIX
+void 	CopyTbl(ata_part_t *,struct _partition *);
+#else
 void 	CopyTbl(ata_part_t *,struct ipart *);
+#endif
 int 	ata_pdinfo(dev_t);
 void 	ide_poll_engine(ata_ctrl_t *);
 
