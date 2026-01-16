@@ -464,10 +464,11 @@ ataioctl(dev_t dev, int cmd, caddr_t arg, int mode, cred_t *crp, int *rvalp)
 		if (!arg) return EFAULT;
 
 		if (U_HAS_FLAG(u,UF_CDROM)) {
-			return DD_CDROM;
+			*((char *)arg) = DD_CDROM;
 		} else {
-			return DD_DISK;
+			*((char *)arg) = DD_DISK;
 		}
+		return 0;
 	}
 
 	case IOCINFO: {
