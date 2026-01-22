@@ -30,8 +30,7 @@ uninstall:
 	/usr/sys/newkernel -install
 
 install: $(DEVNAME).o
-	echo Saving out old hd.o
-	if [ ! -f /usr/sys/386/hd.o ]; then cd /usr/sys/386 && ar -x atlib.a hd.o && ls -l hd.o;  fi
+	if [ ! -f /usr/sys/386/hd.o ]; then echo Saving out old hd.o; cd /usr/sys/386 && ar -x atlib.a hd.o && ls -l hd.o;  fi
 	echo Archiving new $(DEVNAME).o into the kernel library...
 	ar -rv /usr/sys/386/atlib.a $(bin)$(DEVNAME).o
 	# TODO
