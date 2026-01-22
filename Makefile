@@ -21,14 +21,6 @@ CC=cc -DUSE_OS_LONG_IO
 # TODO: sort out the issues with optimized builds, then add
 #  -O2
 
-#cc -I. -D_KERNEL -DSYSV -DSVR40 -DAT386 -DVPIX -DWEITEK -DMERGE386 -DBLTCONS -DEVGA -c ide_core.c
-# 12 cc -I. -D_KERNEL -DSYSV -DSVR40 -DAT386 -DVPIX -DWEITEK -DMERGE386 -DBLTCONS -DEVGA -c ide_queue.c
-# 13 cc -I. -D_KERNEL -DSYSV -DSVR40 -DAT386 -DVPIX -DWEITEK -DMERGE386 -DBLTCONS -DEVGA -c ide_ata.c
-# 14 cc -I. -D_KERNEL -DSYSV -DSVR40 -DAT386 -DVPIX -DWEITEK -DMERGE386 -DBLTCONS -DEVGA -c ide_atapi.c
-# 15 cc -I. -D_KERNEL -DSYSV -DSVR40 -DAT386 -DVPIX -DWEITEK -DMERGE386 -DBLTCONS -DEVGA -c ide_misc.c
-# 16 ld -r -o Driver.o ide_core.o ide_queue.o ide_ata.o ide_atapi.o ide_misc.o
-
-
 # Common options
 CFLAGS=-D_KERNEL -DKERNEL -Di386 -I/usr/include/sys
 #-Iinclude -I.
