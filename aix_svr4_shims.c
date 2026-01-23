@@ -5,7 +5,6 @@
 
 caddr_t kmem_zalloc(size_t size, u_int flags) {
     caddr_t mem = kmemalloc(size, flags);
-    //return kmemalloc(size, flags);
     if (mem) {
         bzero((char *)mem, size);
     }
