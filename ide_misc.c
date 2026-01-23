@@ -644,9 +644,6 @@ berror(struct buf *bp, int resid, int err)
 	bp->b_resid = resid;
 
 	biodone(bp);
-#ifdef _AIX
-	wakeup(bp);
-#endif
 	return 0;
 }
 
@@ -690,9 +687,6 @@ bok(struct buf *bp, int resid)
 #endif
 
 	biodone(bp);
-#ifdef _AIX
-	wakeup(bp);
-#endif
 	ATADEBUG(3, "bok post biodone flags: 0x%x\n", bp->b_flags);
 	return 0;
 }

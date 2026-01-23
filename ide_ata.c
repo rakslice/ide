@@ -884,29 +884,15 @@ ata_pushreq(ata_ctrl_t *ac, ata_req_t *r)
     s = splbio();
     ide_q_put(ac, r);
 
-    if (AC_HAS_FLAG(ac, ACF_INTR_MODE) || !AC_HAS_FLAG(ac, ACF_POLL_RUNNING))
-        ide_kick(ac);
+	/* huh? ide_q_put should kick if necessary, and either way this doesn't
+	   most code avoid calling this in spl? */
+    /* if (AC_HAS_FLAG(ac, ACF_INTR_MODE) || !AC_HAS_FLAG(ac, ACF_POLL_RUNNING))
+          ide_kick(ac); */
 
     splx(s);
 
-	/* this gremlin iowait from within the driver itself is the nuisance
-	   that necessitates all the extra wakeups after biodones everywhere
-
-	   depending on the flags biodone may or may not issue a wakeup --
-	   that is an implementation detail of the layers below this driver
-	   and iowait() is a feature that is only supposed to be called from
-	   the process level, above this code internal to atastrategy.
-
-	   but from the briefest of testing it appears that the delay
-	   provided by this wait is critical to this ide driver's timing rubber bands
-
-	   therefore we sprinkle iowaits after every biodone
-	   (which hopefully just incurs some extra cycles)
-
-	   TODO try wakeups in spl with biodones, narrow down the flag conditions when we need the extra wakeup
-	 */
-    iowait(bp);
-    return (bp->b_flags & B_ERROR) ? bp->b_error : 0;
+	/* return value is ignored */
+    return 0; /* (bp->b_flags & B_ERROR) ? bp->b_error : 0; */
 }
 
 int
