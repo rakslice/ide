@@ -280,6 +280,9 @@ typedef struct buf buf_t;
 #define AC_SET_FLAG(ac,f)   ((ac)->flags |= (f))
 #define AC_CLR_FLAG(ac,f)   ((ac)->flags &= ~(f))
 
+/* Leave busy state and wakeup any ataclose() waiting for idle */
+#define AC_END_BUSY(ac) do { AC_CLR_FLAG(ac, ACF_BUSY); if (AC_HAS_FLAG(ac,ACF_CLOSING)) wakeup((caddr_t)(ac)->ioque); } while(0)
+
 #define ATA_RF_NEEDCOPY	0x0001
 #define ATA_RF_DONE	0x0002
 #define ATA_RF_CDB_SENT	0x0004

@@ -748,7 +748,7 @@ if (!r) {
     if (que) {
         que->last_err = err;
         que->state = AS_IDLE;
-        AC_CLR_FLAG(ac, ACF_BUSY);
+        AC_END_BUSY(ac);
         que->cur = NULL;
     }
     splx(s);
@@ -786,7 +786,7 @@ ATADEBUG(9,"ata_finish(reqid: %lu)\n",r->reqid);
 	}
 
 	s=splbio();
-AC_CLR_FLAG(ac,ACF_BUSY);
+AC_END_BUSY(ac);
 que->cur = NULL;
 que->state = AS_IDLE;
 que->last_err = r->err;

@@ -767,7 +767,7 @@ atapi_request(ata_ctrl_t *ac, ata_req_t *r, int arm_ticks)
  			s = splbio();
  			q->cur   = 0;
  			q->state = AS_IDLE;
- 			AC_CLR_FLAG(ac,ACF_BUSY);
+			AC_END_BUSY(ac);
  			splx(s);
  			return rc;
  		}

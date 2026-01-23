@@ -191,7 +191,7 @@ reset_queue(ata_ctrl_t *ac,int hard)
 	/* Soft reset of the channel engine; do NOT free xfer_buf here. */
 	q->cur       = 0;
 	q->state     = AS_IDLE;
-	AC_CLR_FLAG(ac, ACF_BUSY);
+	AC_END_BUSY(ac);
 }
 
 void

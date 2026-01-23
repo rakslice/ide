@@ -90,7 +90,7 @@ ataopen(dev_t *devp, int flags, int otyp, cred_t *crp)
         		q->xfer_bufsz = ATA_XFER_BUFSZ;
 			ATADEBUG(5,"%s: xfer_buf=%lx\n",Cstr(ac),q->xfer_buf);
     		}
-		AC_CLR_FLAG(ac,ACF_BUSY); 
+		AC_END_BUSY(ac);
 		q->state	= AS_IDLE;
 		q->cur		= NULL; /* opencount==0 */
 		ac->tmo_id	= 0;
