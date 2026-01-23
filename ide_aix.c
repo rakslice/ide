@@ -251,7 +251,7 @@ ata_summarize_drives() {
         /* go through the drives in this controller and note any units that have been found */
 
         if (AC_HAS_FLAG(&ata_ctrl[i],ACF_PRESENT)) {
-            printf("ata: controller %d\n", i);
+            printf("ata: controller %d - io_base=0x%x irq=%d\n", i, ata_ctrl[i].io_base, ata_ctrl[i].irq);
             for (int drive = 0; drive < ATA_MAX_DRIVES; drive++) {
                 ata_unit_t * u = ata_ctrl[i].drive[drive];
                 if (u == NULL) {
