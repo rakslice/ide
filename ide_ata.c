@@ -893,12 +893,12 @@ ata_pushreq(ata_ctrl_t *ac, ata_req_t *r)
 	   that necessitates all the extra wakeups after biodones everywhere
 
 	   depending on the flags biodone may or may not issue a wakeup --
-	   that is an implementation detail fo the layers below this one
+	   that is an implementation detail of the layers below this driver
 	   and iowait() is a feature that is only supposed to be called from
-	   the process level.
+	   the process level, above this code internal to atastrategy.
 
 	   but from the briefest of testing it appears that the delay
-	   is critical to its timing rubber bands
+	   provided by this wait is critical to this ide driver's timing rubber bands
 
 	   therefore we sprinkle iowaits after every biodone
 	   (which hopefully just incurs some extra cycles)
