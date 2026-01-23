@@ -3,7 +3,7 @@
 #include <sys/vmalloc.h>
 
 
-caddr_t kmem_zalloc(u_int flags, size_t size) {
+caddr_t kmem_zalloc(size_t size, u_int flags) {
     caddr_t mem = kmemalloc(size, flags);
     //return kmemalloc(size, flags);
     if (mem) {

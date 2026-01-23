@@ -23,7 +23,7 @@ void kmem_free(caddr_t mem, size_t size);
 
 //#define kem_free(mem, size) kmem_free_impl((caddr_t)(mem), (size))
 
-caddr_t kmem_zalloc(u_int flags, size_t size);
+caddr_t kmem_zalloc(size_t size, u_int flags);
 
 char * strcpy (char * s1, char * s2);
 time_t drv_usectohz(time_t microseconds);
