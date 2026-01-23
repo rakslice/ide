@@ -13,11 +13,6 @@
 #include <sys/minidisk.h>
 #undef drive
 
-int hdanotherinit() {
-    printf("ata: here is hdanotherinit being called\n");
-    return 0;
-}
-
 
 int 	ataopen(dev_t *, int, int, cred_t *);
 int 	ataclose(dev_t, int, int, cred_t *);
