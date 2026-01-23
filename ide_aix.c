@@ -292,6 +292,17 @@ atahdinit(dev_t devno) {
     if (atahdinit_previously_called == 0) {
         atahdinit_previously_called = 1;
 
+        /* Tweak the Space settings for our purposes */
+
+        // Debug
+        //int	atadebug   = 9;
+
+        // Controllers to look for:
+        // enable primary
+        ata_ctrl[0].flags = ACF_PRESENT;
+        // disable tertiary
+        ata_ctrl[2].flags = ACF_NONE;
+
         ata_xhd_link.next = NULL;
         ata_xhd_link.drive_offset = 0;
         ata_xhd_link.driver_name = "atahd";
