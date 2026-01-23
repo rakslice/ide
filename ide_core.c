@@ -627,15 +627,18 @@ ataioctl(dev_t dev, int cmd, caddr_t arg, int mode, cred_t *crp, int *rvalp)
 	/* --- Private ATAPI CD-ROM TOC / audio controls --- */
 	case CDIOC_READTOC: {
 		cd_toc_io_t tio;
-		u8_t tocbuf[4096];
+		u8_t * tocbuf = (u8_t *)kmem_alloc(4096, KM_SLEEP);
 		int rc;
+		int out;
 		ushort maxlen, actual, dlen;
+		if (tocbuf == NULL)
+			return EFAULT;
 
 		if (!U_HAS_FLAG(u,UF_ATAPI) || !U_HAS_FLAG(u,UF_CDROM))
-			return ENOTTY;
+			{ out = ENOTTY; goto cd_readtoc_done; }
 
 		if (copyin(arg, (caddr_t)&tio, sizeof(tio)) != 0)
-			return EFAULT;
+			{ out = EFAULT; goto cd_readtoc_done; }
 
 		maxlen = tio.toc_len;
 		if (maxlen == 0 || maxlen > sizeof(tocbuf))
@@ -647,8 +650,7 @@ ataioctl(dev_t dev, int cmd, caddr_t arg, int mode, cred_t *crp, int *rvalp)
 				 tio.track,
 				 tocbuf, maxlen);
 		if (rc != 0)
-			return EIO;
-
+			{ out = EIO; goto cd_readtoc_done; }
 		/* TOC length is stored in first two bytes (big-endian). */
 		dlen = (tocbuf[0] << 8) | tocbuf[1];
 		/* Total bytes available = dlen + 2 header bytes. */
@@ -657,14 +659,17 @@ ataioctl(dev_t dev, int cmd, caddr_t arg, int mode, cred_t *crp, int *rvalp)
 			actual = maxlen;
 
 		if (copyout((caddr_t)tocbuf, (caddr_t)tio.toc_buf, actual) != 0)
-			return EFAULT;
+			{ out = EFAULT; goto cd_readtoc_done; }
 
 		/* Return actual length to caller. */
 		tio.toc_len = actual;
 		if (copyout((caddr_t)&tio, arg, sizeof(tio)) != 0)
-			return EFAULT;
+			{ out = EFAULT; goto cd_readtoc_done; }
 
-		return 0;
+		out = 0;
+cd_readtoc_done:
+		if (tocbuf) kmem_free((caddr_t)tocbuf, 4096);
+		return out;
 	}
 
 	case CDIOC_PLAYMSF: {
