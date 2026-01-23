@@ -234,8 +234,7 @@ ide_start(ata_ctrl_t *ac)
 		Cstr(ac), r ? r->reqid : 0, ac->nreq, q->cur, ast, ac->flags);
 
         s = splbio();
-	if (AC_HAS_FLAG(ac,ACF_BUSY) || 
-	    AC_HAS_FLAG(ac,ACF_CLOSING) || q->cur) { splx(s); return; }
+	if (AC_HAS_FLAG(ac,ACF_BUSY) || q->cur) { splx(s); return; }
 
         /* pop from queue */
 	r=ide_q_get(ac);
