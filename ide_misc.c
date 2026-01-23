@@ -241,7 +241,6 @@ ata_read_vtoc(dev_t dev,int part)
 	caddr_t k = 0;
 	struct pdinfo *pd;
 	struct vtoc *v;
-#endif
 	ata_part_t *fp = &u->fd[part];
 	int 	s;
 	int rootu = ATA_DEV_UNIT(dev);
