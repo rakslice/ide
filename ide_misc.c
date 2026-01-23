@@ -127,10 +127,14 @@ static	char	buf[20];
 	int	d=ac->sel_drive;
 	int	c=ac->idx;
 	ata_unit_t *u = ac->drive[d];
+#ifdef _AIX
+	sprintf(buf,"c%dd%d",c,d);
+#else
 	dev_t	dev=ATA_DEV(c,d);
 	char 	*suffix=ISABSDEV(dev) ? " <ABSDEV>" : "";
 
 	sprintf(buf,"c%dd%d%s",c,d,suffix);
+#endif
 	return buf;
 }
 
@@ -138,13 +142,18 @@ char *
 Dstr(dev_t dev)
 {
 static	char	buf[50];
-	char 	*suffix=ISABSDEV(dev) ? " <ABSDEV>" : "";
 	int 	ctrl = ATA_CTRL(dev), 
 		unit = ATA_UNIT(dev), 
-		driv = ATA_DRIVE(dev), 
-		fdisk = ATA_PART(dev),
+		driv = ATA_DRIVE(dev);
+#ifdef _AIX
+		char *suffix=is_mbr_part(dev) ? "p" : "";
+		sprintf(buf,"c%dd%ds%d%s",ctrl,driv,minor(dev) & 0x1f,suffix);
+#else
+	char 	*suffix=ISABSDEV(dev) ? " <ABSDEV>" : "";
+	int fdisk = ATA_PART(dev),
 		slice = ATA_SLICE(dev);
 	sprintf(buf,"c%dd%dp%ds%d%s",ctrl,driv,fdisk,slice,suffix);
+#endif
 	return buf;
 }
 
@@ -152,11 +161,11 @@ char *
 Istr(int cmd)
 {
 	switch (cmd) {
-	case V_CONFIG:	 return "V_CONFIG";
 #ifdef _AIX
 	case IOCTYPE:	 return "IOCTYPE";
 	case IOCINFO:	 return "IOCINFO";
 #else
+	case V_CONFIG:	 return "V_CONFIG";
 	case V_REMOUNT:  return "V_REMOUNT";
 	case V_GETPARMS: return "V_GETPARMS";
 	case V_FORMAT: 	 return "V_FORMAT";
@@ -205,8 +214,8 @@ ata_attach(int ctrl)
 #endif
 		AC_SET_FLAG(ac,ACF_INTR_MODE);
 	}
-	if (ata_intr_mode) printf("ATA in intr mode\n");
-	if (atapi_intr_mode) printf("ATAPI in intr mode\n");
+	if (ata_intr_mode) printf("ATA %d in intr mode\n", ctrl);
+	if (atapi_intr_mode) printf("ATAPI %d in intr mode\n", ctrl);
 	ata_softreset_ctrl(ac);
 	for (drive = 0; drive <= 1; drive++) {
 		ata_unit_t *u = ac->drive[drive];
@@ -219,6 +228,7 @@ ata_attach(int ctrl)
 	}
 }
 
+#ifndef _AIX
 int 
 ata_read_vtoc(dev_t dev,int part)
 {
@@ -229,9 +239,6 @@ ata_read_vtoc(dev_t dev,int part)
 	ata_unit_t *u=ac->drive[drive];
 	u32_t 	base, lba, off;
 	caddr_t k = 0;
-#ifdef _AIX
-	VTOC1_3 * aix_vtocs;
-#else
 	struct pdinfo *pd;
 	struct vtoc *v;
 #endif
@@ -244,8 +251,6 @@ ata_read_vtoc(dev_t dev,int part)
 		Dstr(dev),BASEDEV(dev),rootu,swapu);
 
 	if (U_HAS_FLAG(u,UF_ATAPI)) return 0;
-
-	printf("ata: ataopen\n");
 
 	/* Only attempt on UNIX partitions with a size. */
 	if (fp->systid != UNIXOS || fp->nsectors == 0) return 0;
@@ -264,38 +269,6 @@ ata_read_vtoc(dev_t dev,int part)
 		return EIO;
 	}
 
-#ifdef _AIX
-	printf("ata: checking for vtoc magic\n");
-	aix_vtocs = (VTOC1_3 *)k;
-	for (int i = 0; i<MAGIC_LENGTH; i++) {
-		if (aix_vtocs->vtoc1.magic_string[i] != MAGIC_STRING[i]) {
-			// FIMXE adjust to free the relevant read
-			printf("ata: not found\n");
-			kmem_free(k, DEV_BSIZE);
-			return 0;
-		}
-	}
-	printf("ata: ok\n");
-
-	// FIXME do we have the rest of the sectors already?
-
-	/* Copy slices from vtoc into our driver table. */
-	for (s = 0; s < MAX_MINIDISKS; ++s) {
-		// FIXME check for terminator
-		fp->slice[s].p_tag = aix_vtocs->vtoc1.mini[s].type; //v->v_part[s].p_tag;
-		// FIXME what flags
-		fp->slice[s].p_flag = 0; //v->v_part[s].p_flag;
-		fp->slice[s].p_start = aix_vtocs->vtoc1.mini[s].s_block; //v->v_part[s].p_start;
-		fp->slice[s].p_size  = aix_vtocs->vtoc1.mini[s].num_blks; // v->v_part[s].p_size;
-		if (fp->slice[s].p_tag == LT_AIX_PAGE /* V_SWAP */ /*&&*/
-		    /*fp->slice[s].p_flag & V_VALID */ ) {
-				if (swapdev != NODEV && rootu == swapu) {
-					nswap = fp->slice[s].p_size;
-				}
-			}
-	}
-
-#else
 	pd = (struct pdinfo *)k;
 	if (pd->sanity != VALID_PD || pd->version != 1) {
 		kmem_free(k, DEV_BSIZE);
@@ -331,7 +304,6 @@ ata_read_vtoc(dev_t dev,int part)
 				}
 			}
 	}
-#endif
 
 	/* Whole-fdisk pseudo-slice: full partition range. */
 	fp->slice[ATA_WHOLE_PART_SLICE].p_start = 0;
@@ -340,6 +312,7 @@ ata_read_vtoc(dev_t dev,int part)
 	kmem_free(k, DEV_BSIZE);
 	return 1;
 }
+#endif
 
 void
 ata_copy_model(u16_t *id, char *dst)
@@ -473,21 +446,38 @@ ata_region_from_dev(dev_t dev, u32_t *out_base, u32_t *out_len)
 {
 	ata_ctrl_t *ac = &ata_ctrl[ATA_CTRL(dev)];
 	ata_unit_t *u = &ata_unit[ATA_UNIT(dev)];
+	u32_t	base=0, len=0, bsz512;
+#ifndef _AIX
 	int	part  = ATA_PART(dev);
 	int	slice = ATA_SLICE(dev);
-	u32_t	base=0, len=0, bsz512;
 	ata_part_t *fp = &u->fd[part];
+#endif
+	daddr_t slice_start = 0;
+
+#ifdef _AIX
+	struct partition * hdp = partition_from_dev(dev);
+	if (hdp) {
+		slice_start = hdp->p_start;
+	}
+
+	ATADEBUG(2,"ata_region_from_dev(%s start=%lu)\n",
+		Dstr(dev), (u32_t)slice_start);
+#else
+	slice_start = fp->slice[slice].p_start;
 
 	ATADEBUG(2,"ata_region_from_dev(%s base=%lu, start=%lu) ABSDEV=%d\n",
 		Dstr(dev), (u32_t)fp->base_lba, 
-		(u32_t)fp->slice[slice].p_start,
+		(u32_t)slice_start,
 		ISABSDEV(dev));
+#endif
+
 
 	if (U_HAS_FLAG(u,UF_ATAPI)) {
         	bsz512 = (u->lbsize >> 9) ? (u->lbsize >> 9) : 1;
         	base = 0;
         	len  = u->atapi_blocks * bsz512;
 	} else {
+#ifndef _AIX
 		if (ISABSDEV(dev)) {
 			base = 0;
 			len  = u->nsectors;
@@ -503,14 +493,30 @@ ata_region_from_dev(dev_t dev, u32_t *out_base, u32_t *out_len)
 				}
 			}
 		}
+#else
+		if (ATA_IS_WHOLE_DISK_DEV(dev)) {
+			base = 0;
+			len = u->nsectors;
+		} else if (hdp) {
+			base = hdp->p_start;
+			len = hdp->p_size;
+		}
+#endif
 	}
+#ifdef _AIX
+	ATADEBUG(1,"region_from_dev: %s slice_start=%lu final_base=%lu\n",
+		Dstr(dev),slice_start,base);
+#else
 	ATADEBUG(1,"region_from_dev: %s part_base=%lu slice_start=%lu final_base=%lu\n",
-		Dstr(dev),fp->base_lba,fp->slice[slice].p_start,base);
+		Dstr(dev),fp->base_lba,slice_start,base);
+#endif
 
 	*out_base = base;
 	*out_len  = len;
 	return;
 }
+
+#ifndef _AIX
 
 int
 ata_pdinfo(dev_t dev)
@@ -568,6 +574,7 @@ ata_pdinfo(dev_t dev)
 	kmem_free((caddr_t)mboot,DEV_BSIZE);
 	return 0;
 }
+#endif
 
 int 	
 ata_getblock(dev_t dev, daddr_t blkno, caddr_t buf, u32_t count)
@@ -627,31 +634,69 @@ ata_putblock(dev_t dev, daddr_t blkno, caddr_t buf, u32_t count)
 int
 berror(struct buf *bp, int resid, int err)
 {
+#ifdef _AIX
+	ATADEBUG(3,"berror()\n");
+#else
 	char *str = ISABSDEV(bp->b_edev) ? "<ABSDEV>" : "";
 
 	ATADEBUG(3,"berror(%s)\n",str);
+#endif
+
 	bp->b_flags |= B_ERROR; 
 	bp->b_error = err; 
 	bp->b_resid = resid;
-	biodone(bp); 
+
+	biodone(bp);
+#ifdef _AIX
+	wakeup(bp);
+#endif
 	return 0;
 }
 
 int
 bok(struct buf *bp, int resid)
 {
-	char *str = ISABSDEV(bp->b_edev) ? "<ABSDEV>" : "";
+#ifdef _AIX
+	int absolute_write = ATA_IS_WHOLE_DISK_DEV(bp->b_edev);
+#else
+	int absolute_write = ISABSDEV(bp->b_edev);
+#endif
+	char *str = absolute_write ? "<ABSDEV>" : "";
 
-	ATADEBUG(3,"bok(%s)\n",str);
+	ATADEBUG(3,"bok(%s) bp=0x%x dev=0x%x flags=0x%x\n",str, bp, bp->b_edev, bp->b_flags);
 	bp->b_flags &= ~B_ERROR; 
 	bp->b_resid = resid;
-	if (ISABSDEV(bp->b_edev) && !(bp->b_flags & B_READ)) {
+#ifndef _AIX
+	if (absolute_write && !(bp->b_flags & B_READ)) {
+		ATADEBUG(3, "bok flushing\n");
 		ata_ctrl_t *ac = &ata_ctrl[ATA_CTRL(bp->b_edev)];
 		u8_t drive = ATA_DRIVE(bp->b_edev);
 		bflush(bp->b_edev);
+		ATADEBUG(3, "bok flushing ata\n");
 		ata_flush_cache(ac,drive);
 	}
+#endif
+	ATADEBUG(3, "bok calling biodone\n");
+	ATADEBUG(3, "bok bp=0x%x pre biodone flags: 0x%x\n", bp, bp->b_flags);
+
+#if DEBUG_BUF_DATA_WORDS
+	if (bp->b_flags & B_READ) {
+		/* write */
+		printf("bok some data from buf 0x%x: ", bp->b_un.b_addr);
+		short * pos = (short *)bp->b_un.b_addr;
+		for (int i = 0; i < 12; i++) {
+			if (i >= bp->b_bcount / 2) break;
+			printf("%04x ", *pos++);
+		}
+		printf("\n");
+	}
+#endif
+
 	biodone(bp);
+#ifdef _AIX
+	wakeup(bp);
+#endif
+	ATADEBUG(3, "bok post biodone flags: 0x%x\n", bp->b_flags);
 	return 0;
 }
 
@@ -883,14 +928,24 @@ get_sysid(u8_t systid)
 {
 	switch(systid) {
 	case EMPTY:		return "Empty";
+#ifndef _AIX
 	case UNUSED:		return "Unused";
+#endif
 	case FAT12:		return "FAT12";
+#ifndef _AIX
 	case PCIXOS:		return "PCIXOS";
+#endif
 	case FAT16:		return "FAT16";
+#ifndef _AIX
 	case EXTDOS:		return "EXTDOS";
+#else
+	case SI_EXT_DOS:		return "EXTDOS";
+#endif
 	case NTFS:		return "NTFS";
+#ifndef _AIX
 	case DOSDATA:		return "DOSDATA";
 	case OTHEROS:		return "OTHEROS";
+#endif
 	case SVR4:		return "Unix SVR4";
 	case LINUXSWAP:		return "Linux Swap";
 	case LINUXNATIVE:	return "Linux";
@@ -906,6 +961,7 @@ get_sysid(u8_t systid)
 	return "??";
 }
 
+#ifndef _AIX
 void
 ata_dump_fdisk(int ctrl, u8_t drive)
 {
@@ -954,3 +1010,4 @@ ata_dump_fdisk(int ctrl, u8_t drive)
 		}
 	}
 }
+#endif

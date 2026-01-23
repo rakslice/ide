@@ -135,6 +135,7 @@ ata_identify(ata_ctrl_t *ac, int drive)
 
 	if (ata_wait(ac, ATA_SR_DRQ, ATA_SR_BSY, 500000, 0, 0) != 0) {
 		/* no ATA device mark not present */
+		ATADEBUG(1, "ata: not present\n");
 		U_CLR_FLAG(u,UF_PRESENT);
 		return ENODEV;
 	}
@@ -374,25 +375,57 @@ pio_one_sector(ata_ctrl_t *ac, ata_req_t *r)
 {
 	u16_t 	*p16 = (u16_t *)r->xptr;
 	int	i;
-	
+
+/*	u16_t csum = 0; */
 	if (r->is_write) {
 		ATADEBUG(2,"pio_one_sector: WRITE lba=%lu addr=%08x\n",
 			(u32_t)r->lba_cur, p16);
+#if 0
 
-		for(i=0; i<(ATA_SECSIZE/2); i++)
+#if DEBUG_BUF_DATA_WORDS
+		printf("ata data: ");
+#endif
+		for(i=0; i<(ATA_SECSIZE/2); i++) {
 			outw(ATA_DATA_O(ac), p16[i]);
+			csum += p16[i];
+#if DEBUG_BUF_DATA_WORDS
+			if (i < 12)
+				printf("%04x ", p16[i]);
+#endif
+		}
+#else
+	loopoutsw(ATA_DATA_O(ac), p16, ATA_SECSIZE/2);
+#endif
 	} else {
+
+#if 0
 		ATADEBUG(2,"pio_one_sector: READ lba=%lu addr=%08x\n",
 			(u32_t)r->lba_cur, p16);
-
-		for(i=0; i<(ATA_SECSIZE/2); i++)
+#if DEBUG_BUF_DATA_WORDS
+		printf("ata data: ");
+#endif
+		for(i=0; i<(ATA_SECSIZE/2); i++) {
 			p16[i] = inw(ATA_DATA_O(ac));
+			csum += p16[i];
+#if DEBUG_BUF_DATA_WORDS
+			if (i < 12)
+				printf("%04x ", p16[i]);
+#endif
+		}
+#else
+	loopinsw(ATA_DATA_O(ac), p16, ATA_SECSIZE/2);
+#endif
 	}
+
+#if DEBUG_BUF_DATA_WORDS
+	printf(" ...\n");
+#endif
 	r->xptr     += ATA_SECSIZE;
 	r->xfer_off += ATA_SECSIZE;
 	if (r->chunk_left >= 0)   r->chunk_left--;
 	if (r->sectors_left >= 0) r->sectors_left--;
-/*	ATADEBUG(3,"pio_one_sector done: xfer_off=%08x chunk_left=%d sectors_left=%d\n", r->xfer_off,r->chunk_left,r->sectors_left);*/
+/*	ATADEBUG(3, "pio_one_sector csum %d\n", (int)csum); */
+	ATADEBUG(3,"pio_one_sector done: xfer_off=%08x chunk_left=%d sectors_left=%d\n", r->xfer_off,r->chunk_left,r->sectors_left);
 	return 0;
 }
 
@@ -630,6 +663,10 @@ ata_request(ata_ctrl_t *ac,ata_req_t *r,int arm_ticks)
 		/* POLL mode: allow multi-sector PIO up to u->pio_multi */
 	}
 
+	if (n >= (1<<22)) {
+		printf("ata: ata_request() bytes value overflow with sector count %d\n", n);
+	}
+
 	bytes = (size_t)n << 9; /* * 512U */
 
 	r->lba_cur 	= r->lba + (r->xfer_off >> 9);
@@ -639,6 +676,10 @@ ata_request(ata_ctrl_t *ac,ata_req_t *r,int arm_ticks)
 	r->cmd          = multicmd(ac, r->is_write,r->lba_cur,n);
 	r->flags       &= ~ATA_RF_NEEDCOPY;
 
+#ifdef _AIX
+	/* Use the actual buf */
+	r->xptr = (caddr_t)r->addr + r->xfer_off;
+#else
 	if (r->is_write) {
 		/* Write: prefer bounce buffer for IRQ path; copy from user if valid */
 		if (q->xfer_buf && valid_usr_range((addr_t)r->addr, bytes)) {
@@ -658,6 +699,7 @@ ata_request(ata_ctrl_t *ac,ata_req_t *r,int arm_ticks)
 			r->xptr = (caddr_t)r->addr + r->xfer_off;
 		}
 	}
+#endif
 
 	ATADEBUG(5,"%s: ata_program_next_chunk(%s) blk=%lu count=%lu\n",
 		Cstr(ac),r->is_write?"Write":"Read",r->lba_cur,n);
@@ -846,6 +888,22 @@ ata_pushreq(ata_ctrl_t *ac, ata_req_t *r)
 
     splx(s);
 
+	/* this gremlin iowait from within the driver itself is the nuisance
+	   that necessitates all the extra wakeups after biodones everywhere
+
+	   depending on the flags biodone may or may not issue a wakeup --
+	   that is an implementation detail fo the layers below this one
+	   and iowait() is a feature that is only supposed to be called from
+	   the process level.
+
+	   but from the briefest of testing it appears that the delay
+	   is critical to its timing rubber bands
+
+	   therefore we sprinkle iowaits after every biodone
+	   (which hopefully just incurs some extra cycles)
+
+	   TODO try wakeups in spl with biodones, narrow down the flag conditions when we need the extra wakeup
+	 */
     iowait(bp);
     return (bp->b_flags & B_ERROR) ? bp->b_error : 0;
 }

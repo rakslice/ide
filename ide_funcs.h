@@ -146,10 +146,16 @@ int 	ata_probe_unit(ata_ctrl_t *,u8_t);
 void 	ata_region_from_dev(dev_t, u32_t *, u32_t *);
 #ifdef _AIX
 void 	CopyTbl(ata_part_t *,struct _partition *);
+struct partition * partition_from_dev(dev_t dev);
+
+int dev_to_controller_drive(dev_t dev);
+int dev_to_slice(dev_t dev);
+int is_mbr_part(dev_t dev);
+int ata_reload_mbrs_and_vtocs();
 #else
 void 	CopyTbl(ata_part_t *,struct ipart *);
-#endif
 int 	ata_pdinfo(dev_t);
+#endif
 void 	ide_poll_engine(ata_ctrl_t *);
 
 #endif /* _IDE_FUNCS_H */

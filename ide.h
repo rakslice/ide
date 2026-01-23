@@ -57,6 +57,18 @@
 #include <sys/cmn_err.h>
 #endif
 
+/* Some debug toggles */
+
+#define DEBUG_HIGH_LEVEL_OPERATIONS 0
+#define DEBUG_INDIVIDUAL_IOS 0
+#define DEBUG_BUF_DATA_WORDS 0
+
+#if DEBUG_HIGH_LEVEL_OPERATIONS
+#define dbg_hilvl printf
+#else
+#define dbg_hilvl(fmt, ) /* ... */
+#endif
+
 #ifdef _AIX
 /* basic type constants used elsewhere here */
 
@@ -86,54 +98,11 @@ typedef struct ucred cred_t;
 
 typedef struct buf buf_t;
 
-/* sys/minidisk.h */
-/** TODO we'll have to revisit this as there are two, for now the one where the vtoc lives */
-#define SI_AIX_BOOT	8	/* AIX partition containing VTOC */
-#define UNIXOS SI_AIX_BOOT
 
-#define VTOC_SEC 3
-
-#define V_CONFIG IOCCONFIG
 
 #include <sys/ioctl.h>
 
 #include <sys/devinfo.h>
-
-/* svr4 fdisk.h style partition/vtable defines */
-
-/*
- * structure to hold the fdisk partition table
- */
-struct ipart {
-	unsigned char bootid;	/* bootable or not */
-	unsigned char beghead;	/* beginning head, sector, cylinder */
-	unsigned char begsect;	/* begcyl is a 10-bit number. High 2 bits */
-	unsigned char begcyl;	/*     are in begsect. */
-	unsigned char systid;	/* OS type */
-	unsigned char endhead;	/* ending head, sector, cylinder */
-	unsigned char endsect;	/* endcyl is a 10-bit number.  High 2 bits */
-	unsigned char endcyl;	/*     are in endsect. */
-	long    relsect;	/* first sector relative to start of disk */
-	long    numsect;	/* number of sectors in partition */
-};
-
-#define BOOTSZ		446	/* size of boot code in master boot block */
-#define FD_NUMPART	4	/* number of 'partitions' in fdisk table */
-#define MBB_MAGIC	0xAA55	/* magic number for mboot.signature */
-
-struct  mboot {     /* master boot block */
-	char    bootinst[BOOTSZ];
-	char    parts[FD_NUMPART * sizeof(struct ipart)];
-	ushort   signature;
-};
-
-#define PCIXOS		2	/* PC/IX partition */
-#define EXTDOS SI_EXT_DOS
-#define DOSDATA		86	/* DOS data partition */
-#define OTHEROS		98	/* part. type for appl. (DB?) needs raw partition */
-				/* ID was 0 but conflicted with DOS 3.3 fdisk    */
-#define UNUSED		100	/* unassigned partition */
-
 
 #include "aix_svr4_shims.h"
 
@@ -170,6 +139,8 @@ struct  mboot {     /* master boot block */
 
 #define U2CTRLNO(X)		((X)->ctrl - &ata_ctrl[0])
 
+#ifndef _AIX
+
 /* Minor layout (USL-style, extended) ----------
  * 15 14 12 12  11 10 09 08  07 06 05 04  03 02 01 00
  *                    +-+-+  +  +-+-+ +   +----+----+
@@ -200,6 +171,38 @@ struct  mboot {     /* master boot block */
 #define ATA_DEV(c,d)		(ATA_UNIT_FROM(c,d)<<4)
 #define ATA_DEV_UNIT(d)		ATA_UNIT(getminor(d))
 #define ATA_DEV_SLICE(d)	ATA_SLICE(getminor(d))
+
+#else
+
+/*
+* 15 14 12 12  11 10 09 08  07 06 05 | 04 03 02 01 00
+ *                          +-+-+  +    +-----+----+
+ *                            |    |          |
+ *                            |    |          +-------- Slice
+ *                            |    +------------------- Drive*
+ *                            +------------------------ Controller*
+                       *But everything above bit 5 is the xhd drive number which must first be translated by xhd drive_offset
+*/
+
+#define AIX_DRIVE_NUM(m) (dev_to_controller_drive(m))
+#define ATA_CTRL(m)  (AIX_DRIVE_NUM(m) >> 1)
+#define ATA_DRIVE(m) (AIX_DRIVE_NUM(m) & 1)
+
+#define ATA_UNIT_FROM(c,d)   	(((c) << 1) | ((d) & 1))
+#define ATA_CTRL_FROM_UNIT(u) 	((u) >> 1)
+#define ATA_DRIVE_FROM_UNIT(u) 	((u) & 1)
+#define ATA_UNIT(m)          	ATA_UNIT_FROM(ATA_CTRL(m), ATA_DRIVE(m))
+
+/* define macros that aren't supported in this case as unrecognized symbols so they fail at compile time */
+#define ATA_SLICE(m) undefined_ata_slice
+#define ATA_PART(m)  undefined_ata_part
+#define ATA_DEV(c, d) undefined_ata_dev
+#define ISABSDEV undefined_isabsdev.mark
+#define ABSDEV undefined_absdev.mark
+
+#define ATA_IS_WHOLE_DISK_DEV(m) ( (!is_mbr_part(m)) && ((minor(m) & 0x1f) == 0) )
+
+#endif
 
 /* ---------- Per-unit state ---------- */
 
@@ -365,8 +368,10 @@ typedef struct ata_part {
 	u32_t	base_lba;
 	u32_t	nsectors;
 	u8_t	systid;
+#ifndef _AIX
 	int	vtoc_valid;
 	struct partition slice[ATA_NPART];
+#endif
 } ata_part_t;
 
 /* ---------- I/O port base + helpers ---------- */
@@ -465,6 +470,10 @@ struct ata_unit {
 
 	ata_part_t fd[4];
 	int	fdisk_valid;
+
+#ifdef _AIX
+	int vtoc_valid;
+#endif
 
 	char 	model[41];
 	int  	ioctl_warned;

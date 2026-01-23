@@ -1,5 +1,11 @@
 #include "ide.h"
 
+#ifdef _AIX
+#include <sys/mdisk.h>
+#undef drive
+#endif
+
+
 ata_unit_t ata_unit[ATA_MAX_UNITS]; /* up to 2 drives per controller */
 
 void
@@ -12,26 +18,53 @@ int
 ataopen(dev_t *devp, int flags, int otyp, cred_t *crp)
 {
 	dev_t 	dev = *devp;
+
+#ifndef _AIX
 	int 	fdisk = ATA_PART(dev),
-		slice = ATA_SLICE(dev),
-		ctrl  = ATA_CTRL(dev),
+		slice = ATA_SLICE(dev);
+#endif
+	int	ctrl  = ATA_CTRL(dev),
 		drive = ATA_DRIVE(dev);
 	ata_ctrl_t *ac = &ata_ctrl[ATA_CTRL(dev)];
 	ata_ioque_t *q = ac->ioque;
 	ata_unit_t *u = ac->drive[drive];
+#ifndef _AIX
 	ata_part_t *fp=&u->fd[fdisk];
+#endif
 	int	s;
 
+	ATADEBUG(1, "ataopen(dev=0x%x, %s)\n", dev, Dstr(dev));
+
+	if (!u) {
+		ATADEBUG(1, "ataopen(%s): no u\n", Dstr(dev));
+		return ENODEV;
+	}
+
+#ifdef _AIX
+	ATADEBUG(1,"ataopen(%s) present=%d dev=%x ctrl=%d driv=%d slice=%d\n",
+		Dstr(dev),
+		U_HAS_FLAG(u,UF_PRESENT),
+		dev,ctrl,drive,minor(dev) & 0x1f);
+#else
 	ATADEBUG(1,"ataopen(%s) present=%d dev=%x part=%d ctrl=%d driv=%d slice=%d\n",
 		Dstr(dev),
 		U_HAS_FLAG(u,UF_PRESENT),
 		dev,fdisk,ctrl,drive,slice);
+#endif
 
-	if (!U_HAS_FLAG(u,UF_PRESENT)) return ENXIO;
+	if (!U_HAS_FLAG(u,UF_PRESENT)) {
+		ATADEBUG(2, "ataopen() controller %d not present; returning ENXIO\n", ctrl);
+		return ENXIO;
+	}
 	if ((u->read_only || 
-	     U_HAS_FLAG(u,UF_CDROM)) && (flags & FWRITE)) return EROFS;
+	     U_HAS_FLAG(u,UF_CDROM)) && (flags & FWRITE)) {
+			ATADEBUG(2, "ataopen() FWRITE and controller %d drive %d is a CDROM; returning EROFS\n", ctrl, drive);
+			return EROFS;
+		 }
 
+#ifndef _AIX
 	if (ISABSDEV(dev)) return ENXIO;
+#endif
 
 	s=splbio();
 	if (AC_HAS_FLAG(ac, ACF_CLOSING)) {
@@ -42,11 +75,13 @@ ataopen(dev_t *devp, int flags, int otyp, cred_t *crp)
 	/* Channel-scoped first-open allocation of bounce buffer */
 	if (q->open_count == 0) {
 
+#ifndef _AIX
 		/*** Read the partition table ***/
 		if (ata_pdinfo(ABSDEV(dev)) != 0) {
 			splx(s);
 			return ENXIO;
 		}
+#endif
 
     		if (q->xfer_buf == 0) {
         		q->xfer_buf = (caddr_t)kmem_zalloc(ATA_XFER_BUFSZ, KM_SLEEP);
@@ -91,10 +126,21 @@ ataopen(dev_t *devp, int flags, int otyp, cred_t *crp)
 		ATADEBUG(1,"ataopen() atapi_blksz=%ld atapi_blocks=%ld\n",
 			 u->atapi_blksz, u->atapi_blocks);
 
+#ifdef _AIX
+		if (ATA_IS_WHOLE_DISK_DEV(dev)) goto ok;
+#else
 		if (slice == 0 || slice == ATA_WHOLE_PART_SLICE) goto ok;
+#endif
 		return ENXIO;
 	}
 
+#ifdef _AIX
+	if (ATA_IS_WHOLE_DISK_DEV(dev)) goto ok;
+	struct partition * hdp = partition_from_dev(dev);
+	if (hdp == NULL) return ENXIO;
+	ATADEBUG(2, "ata: device 0x%x ctrl %d drive %d partition info: start %d size %d tag 0x%x flags 0x%x\n", dev, ctrl, drive, hdp->p_start, hdp->p_size, hdp->p_tag, hdp->p_flag);
+	if (hdp->p_size == 0) return ENXIO;
+#else
 	if (!fp->vtoc_valid) {
 		if (fp->systid == UNIXOS) {
 			if (fp->nsectors > VTOC_SEC) goto ok;
@@ -111,6 +157,7 @@ ataopen(dev_t *devp, int flags, int otyp, cred_t *crp)
 	     fp->slice[slice].p_size == 0) {
 		return ENXIO;
 	}
+#endif
 
 ok:
 	q->open_count++;
@@ -123,13 +170,18 @@ ataclose(dev_t dev, int flags, int otyp, cred_t *crp)
 	ata_ctrl_t *ac = &ata_ctrl[ATA_CTRL(dev)];
 	ata_ioque_t *q = ac->ioque;
 	ata_unit_t *u = ac->drive[ATA_DRIVE(dev)];
+#ifndef _AIX
 	ata_part_t *fp=&u->fd[ATA_PART(dev)];
+	int vtoc_valid = fp->vtoc_valid;
+#else
+	int vtoc_valid = u->vtoc_valid;
+#endif
 	int	s;
 
 	ATADEBUG(1,"ataclose(%s) present=%d fdisk_valid=%d vtoc_valid=%d\n",
 		Dstr(dev),
 		U_HAS_FLAG(u,UF_PRESENT),
-		u->fdisk_valid,fp->vtoc_valid);
+		u->fdisk_valid,vtoc_valid);
 
 	if (!U_HAS_FLAG(u,UF_PRESENT)) return ENODEV;
 
@@ -170,6 +222,7 @@ atabreakup(struct buf *bp)
 int
 atastrategy(struct buf *bp)
 {
+	//printf("ata: atastrategy\n");
 	if (bp == NULL) {
 		printf("atastrategy: bp == NULL\n");
 		return -1;
@@ -194,15 +247,34 @@ atastrategy(struct buf *bp)
 	bp->b_error = 0;
 	bp->b_resid = 0;
 
-        ATADEBUG(1,"atastrategy(%s) %s lba=%lu nsec=%lu flags=%x\n", 
+        ATADEBUG(1,"atastrategy(%s) %s lba=%lu nsec=%lu flags=%x bcount=%d bp=0x%x\n",
+		Dstr(dev),
+		(bp->b_flags&B_READ)?"READ":"WRITE",
+		bp->b_blkno,
+		(bp->b_bcount>>DEV_BSHIFT),
+		bp->b_flags,
+		bp->b_bcount,
+		bp);
+
+#if DEBUG_INDIVIDUAL_IOS
+        dbg_hilvl("atastrategy(%s) %s dev=0x%x lba=%lu nsec=%lu flags=%x bcount=%d bp=0x%x\n",
 		Dstr(dev), 
 		(bp->b_flags&B_READ)?"READ":"WRITE",
+		dev,
 		bp->b_blkno, 
 		(bp->b_bcount>>DEV_BSHIFT),
-		bp->b_flags);
+		bp->b_flags,
+		bp->b_bcount,
+		bp);
+#endif
+
+	if ((u32_t)(bp->b_bcount >> 9) == 0) {
+		ATADEBUG(1, "ata: 0 length i/o\n");
+		return berror(bp,0,EINVAL);
+	}
 
 	ata_region_from_dev(dev,&base,&len);
-	
+
 	r = (ata_req_t *)kmem_zalloc(sizeof(*r),KM_SLEEP);
 	if (!r) return berror(bp,0,ENOMEM);
 
@@ -239,13 +311,17 @@ atastrategy(struct buf *bp)
 }
 
 daddr_t maxb_for_dev(dev_t dev) {
-
+#ifndef _AIX
 	int 	fdisk = ATA_PART(dev),
 		slice = ATA_SLICE(dev);
+#endif
 	ata_unit_t *u = &ata_unit[ATA_UNIT(dev)];
 	daddr_t	maxb;
 	u32_t	blksz;
 	u32_t	bsz512;
+
+	if (!u) return 0;
+	if (!U_HAS_FLAG(u,UF_PRESENT)) return 0;
 
 	/*
 	 * Raw ATAPI devices (e.g. ZIP) may not have a valid VTOC/slice.
@@ -257,7 +333,21 @@ daddr_t maxb_for_dev(dev_t dev) {
 		if (bsz512 == 0) bsz512 = 1;
 		maxb = (daddr_t)(u->atapi_blocks * bsz512);
 	} else {
+#ifdef _AIX
+		if (ATA_IS_WHOLE_DISK_DEV(dev)) {
+			maxb = u->nsectors;
+		} else {
+			struct partition * hdp = partition_from_dev(dev);
+			if (hdp) {
+				maxb = hdp->p_size;
+			} else {
+				maxb = 0;
+			}
+		}
+#else
 		maxb = (daddr_t)(u->fd[fdisk].slice[slice].p_size);
+#endif
+		ATADEBUG(3, "ata: maxb limit %d\n", maxb);
 	}
 	return maxb;
 }
@@ -267,9 +357,15 @@ daddr_t maxb_for_dev(dev_t dev) {
 /* BSD-style minphys takes a struct buf * and adjusts its b_bcount */
 void ata_minphys(struct buf *bp) {
 	if (bp) {
+
 		daddr_t maxb = maxb_for_dev(bp->b_dev);
-		if (bp->b_bcount > maxb) {
-			bp->b_bcount = maxb;
+		/* limit sectors count limit to prevent bytes value overflow */
+		if (maxb > (1<<22)) {
+			maxb = 1<<22;
+		}
+		daddr_t maxbytes = maxb << 9;
+		if (bp->b_bcount > maxbytes) {
+			bp->b_bcount = maxbytes;
 		}
 	} else {
 		printf("ata: ata_minphys(bp == NULL)\n");
@@ -286,9 +382,12 @@ struct buf atabuf;
 int
 ataread(dev_t dev, struct uio *uiop, cred_t *crp)
 {
+	//printf("ata: ataread\n");
 	ATADEBUG(1,"ataread(%s)\n",Dstr(dev));
 
-	//printf("ata: info about this read: base 0x%x count %d icount %d offset 0x%x\n", u.u_base, u.u_count, u.u_icount, u.u_offset);
+#if DEBUG_INDIVIDUAL_IOS
+	dbg_hilvl("ata: ataread(): dev 0x%x base 0x%x count %d icount %d offset 0x%x\n", dev, u.u_base, u.u_count, u.u_icount, u.u_offset);
+#endif
 
 	//printf("ata: about to physio uiop=0x%x\n", uiop);
 
@@ -311,7 +410,12 @@ ataread(dev_t dev, struct uio *uiop, cred_t *crp)
 int
 atawrite(dev_t dev, struct uio *uiop, cred_t *crp)
 {
+	//printf("ata: atawrite\n");
 	ATADEBUG(1,"atawrite(%s)\n",Dstr(dev));
+
+#if DEBUG_INDIVIDUAL_IOS
+	dbg_hilvl("ata: atawrite() %d bytes to offset 0x%x\n", u.u_count, u.u_offset);
+#endif
 
 #ifndef _AIX
 	return physiock(atabreakup, 
@@ -334,9 +438,11 @@ ataioctl(dev_t dev, int cmd, caddr_t arg, int mode, cred_t *crp, int *rvalp)
 {
 	ata_ctrl_t *ac = &ata_ctrl[ATA_CTRL(dev)];
 	ata_unit_t *u = ac->drive[ATA_DRIVE(dev)];
-	int 	fdisk = ATA_PART(dev);
 	int	drive = u->drive;
+#ifndef _AIX
+	int 	fdisk = ATA_PART(dev);
 	ata_part_t *fp=&u->fd[fdisk];
+#endif
 
 	ATADEBUG(1,"ataioctl(%s,%s)\n",Dstr(dev),Istr(cmd));
 
@@ -491,8 +597,30 @@ ataioctl(dev_t dev, int cmd, caddr_t arg, int mode, cred_t *crp, int *rvalp)
 		}
 		dp->un.dk.bytpsec = DEV_BSIZE;
 		dp->un.dk.numblks = u->nsectors;
-		printf("ata: ioctl success\n");
+		//printf("ata: ioctl success\n");
 		return 0;
+	}
+	case HDIOWRT: {
+		ATADEBUG(2, "ata: ioctl HDIOWRT\n");
+		if (!suser()) {
+			ATADEBUG(2, "ata: not superuser, no flags change\n");
+			return 0;
+		}
+		if (ATA_IS_WHOLE_DISK_DEV(dev)) {
+			ATADEBUG(2, "ata: superuser, whole disk dev -> attempting to set OPNWRT\n");
+			struct partition * part = partition_from_dev(dev);
+			if (part == NULL) {
+				ATADEBUG(2, "ata: error fetching struct partition * -> EINVAL\n");
+				return EINVAL;
+			}
+			part->p_flag |= OPNWRT;
+			ATADEBUG(2, "ata: OPNWRT set ok\n");
+			return 0;
+		}
+		return EINVAL;
+	}
+	case HDIORST: {
+		return ata_reload_mbrs_and_vtocs();
 	}
 #endif
 
@@ -620,6 +748,28 @@ ataioctl(dev_t dev, int cmd, caddr_t arg, int mode, cred_t *crp, int *rvalp)
 	}
 }
 
+#ifdef _AIX
+int
+atasize(dev_t dev)
+{
+	struct partition * p;
+	ata_unit_t *u = &ata_unit[ATA_UNIT(dev)];
+	int vtoc_valid = u->vtoc_valid;
+
+	if (!U_HAS_FLAG(u,UF_PRESENT)) return -1;
+
+	if (U_HAS_FLAG(u,UF_ATAPI))
+		return (int)u->nsectors;
+
+	p = partition_from_dev(dev);
+	if (p)
+		return p->p_size;
+	else
+		return -1;
+}
+
+#else
+
 int
 atasize(dev_t dev)
 {
@@ -629,11 +779,13 @@ atasize(dev_t dev)
 
 	if (!U_HAS_FLAG(u,UF_PRESENT)) return -1;
 
-	if (U_HAS_FLAG(u,UF_ATAPI) || !u->fd[fdisk].vtoc_valid)
+	if (U_HAS_FLAG(u,UF_ATAPI) || !u->fd[fdisk].vtoc_valid) /* <-- why would a partition dev give the whole disk size? */
 		return (int)u->nsectors;
 
 	return (int)u->fd[fdisk].slice[slice].p_size;
 }
+
+#endif
 
 int
 atainit(void)
@@ -746,11 +898,11 @@ ataintr(int irq)
 			return DDI_INTR_CLAIMED;
 		}
 		
-		printf("STRAY %s: ST=%02x ERR=%02x AST=%02x q=%p cur=%p last: cmd=%02x lba=%ld sc=%d dh=%02x reqid=%d age=%lu\n",
+		printf("STRAY %s: ST=%02x ERR=%02x AST=%02x q=%p cur=%p last: cmd=%02x lba=%ld sc=%d dh=%02x reqid=%d age=%lu u=0x%x\n",
 			Cstr(ac),st,err,ast,
 			q,q?q->cur:NULL,
 			ac->lc.cmd,ac->lc.lba,ac->lc.sc,ac->lc.dh,ac->lc.reqid,
-			(lbolt-ac->lc.tick));
+			(lbolt-ac->lc.tick), u);
 
 		return DDI_INTR_CLAIMED;
 	}
