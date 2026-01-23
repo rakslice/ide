@@ -129,7 +129,11 @@ void 	atapi_decode_sense(u8_t *, int);
 
 /*** ide_misc ***/
 char 	*getstr(char *, int, int, int, int);
+#if COMPILE_OUT_ATADEBUG
+#define ATADEBUG(int,fmt)
+#else
 void	ATADEBUG(int,char *,...);
+#endif
 int 	ata_getblock(dev_t, daddr_t, caddr_t, u32_t);
 int 	ata_putblock(dev_t, daddr_t, caddr_t, u32_t);
 int 	berror(struct buf *, int, int);
