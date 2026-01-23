@@ -137,10 +137,6 @@ struct  mboot {     /* master boot block */
 				/* ID was 0 but conflicted with DOS 3.3 fdisk    */
 #define UNUSED		100	/* unassigned partition */
 
-#define CE_CONT 0
-#define CE_NOTE 1
-#define CE_WARN 2
-#define CE_PANIC 3
 
 #include "aix_svr4_shims.h"
 

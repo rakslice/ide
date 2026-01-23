@@ -8,9 +8,11 @@
 
 #define getminor minor
 
-#define cmn_err(code, fmt) (printf(fmt))
-#define cmn_err(code, fmt, a) (printf(fmt, a))
-#define cmn_err(code, fmt, a, b) (printf(fmt, a, b))
+void cmn_err(int lvl, char *fmt, ...);
+#define CE_CONT 0
+#define CE_NOTE 1
+#define CE_WARN 2
+#define CE_PANIC 3
 
 #define dbg_printf(fmt) (printf(fmt))
 

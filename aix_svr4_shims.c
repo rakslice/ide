@@ -55,3 +55,7 @@ char * strcpy(char * dst, char * src) {
 int valid_usr_range(addr_t addr, size_t bytes) {
     return TRUE;
 }
+
+void cmn_err(int lvl, char *fmt, int a, int b, int c, int d, int e, int f, int g, int h, int i, int j) {
+	printf(fmt, a, b, c, d, e, f, g, h, i, j);
+}
