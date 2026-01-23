@@ -23,9 +23,7 @@ extern void dbg_putchar(int);
 
 u32_t	req_seq=0;
 
-#ifdef _AIX
-void ATADEBUG(int lvl, char *fmt, ...);
-#else
+#ifndef _AIX
 void
 ATADEBUG(int lvl, char *fmt, ...) 
 {
