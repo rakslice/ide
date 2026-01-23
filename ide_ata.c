@@ -872,6 +872,7 @@ ata_pushreq(ata_ctrl_t *ac, ata_req_t *r)
 
     if (!ac || !que || !r || !bp) {
         /* Internal callers should always provide a buf-backed request. */
+		printf("ata_pushreq is going EIO ac %d que %d r %d bp %d\n", !ac, !que, !r, !bp);
         return EIO;
     }
 
