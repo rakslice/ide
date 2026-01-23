@@ -247,12 +247,6 @@ void
 ata_summarize_drives() {
     printf("ata: Summary of drives:\n");
     for (int i = 0 ; i < ATA_MAX_CTRL; i++) {
-        /* skip drives that ata doesn't have as present */
-        if (!AC_HAS_FLAG(&ata_ctrl[i],ACF_PRESENT)) {
-            printf("ata: %d not present\n", i);
-        } else {
-            printf("ata: %d present\n", i);
-        }
 
         /* go through the drives in this controller and note any units that have been found */
 
