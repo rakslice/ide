@@ -12,12 +12,6 @@ caddr_t kmem_zalloc(size_t size, u_int flags) {
     return mem;
 }
 
-/*
-void biodone (struct buf *bp) {
-    iodone(bp);
-}
-*/
-
 void kmem_free(caddr_t mem, size_t size) {
     mfree(mem);
 }

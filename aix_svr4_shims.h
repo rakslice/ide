@@ -23,6 +23,10 @@ void kmem_free(caddr_t mem, size_t size);
 
 //#define kem_free(mem, size) kmem_free_impl((caddr_t)(mem), (size))
 
+/* svr style*/
+#define biodone(bp) iodone(bp)
+#define kmem_alloc(size, flags) kmemalloc(size, flags)
+
 caddr_t kmem_zalloc(size_t size, u_int flags);
 
 char * strcpy (char * s1, char * s2);
