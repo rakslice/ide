@@ -23,9 +23,6 @@
 #ifndef _IDE_H
 #define _IDE_H
 
-#ifndef _AIX
-#endif
-
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/buf.h>
