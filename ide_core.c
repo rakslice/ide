@@ -185,6 +185,15 @@ ataclose(dev_t dev, int flags, int otyp, cred_t *crp)
 
 	if (!U_HAS_FLAG(u,UF_PRESENT)) return ENODEV;
 
+#ifdef _AIX
+	if (ATA_IS_WHOLE_DISK_DEV(dev)) {
+		struct partition * part = partition_from_dev(dev);
+		if (part) {
+			part->p_flag &= ~OPNWRT;
+		}
+	}
+#endif
+
 	s=splbio();
 	AC_SET_FLAG(ac, ACF_CLOSING);
 	while (AC_HAS_FLAG(ac,ACF_BUSY) || q->q_head) {
@@ -277,6 +286,20 @@ atastrategy(struct buf *bp)
 		ATADEBUG(1, "ata: 0 length i/o\n");
 		return berror(bp,0,EINVAL);
 	}
+
+#ifdef _AIX
+	if (ATA_IS_WHOLE_DISK_DEV(dev) && ((bp->b_flags & B_READ) == 0)) {
+		struct partition * part = partition_from_dev(dev);
+		if (!part) {
+			ATADEBUG(1, "ata: can't access hdpart for whole disk, ctrl %d drive %d\n", ATA_CTRL(dev), ATA_DRIVE(dev));
+			return berror(bp,0,EINVAL);
+		}
+		if ((part->p_flag & OPNWRT) == 0) {
+			ATADEBUG(3, "ata: entire disk write but write not enabled, ctrl %d drive %d\n", ATA_CTRL(dev), ATA_DRIVE(dev));
+			return berror(bp,0,EINVAL);
+		}
+	}
+#endif
 
 	ata_region_from_dev(dev,&base,&len);
 
