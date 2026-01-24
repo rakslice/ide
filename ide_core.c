@@ -268,6 +268,11 @@ atastrategy(struct buf *bp)
 		bp);
 #endif
 
+	if (AC_HAS_FLAG(ac, ACF_CLOSING)) {
+		ATADEBUG(3, "ata: atastrategy(bp=0x%x) for ctrl %d while ctrl is closing -> EINVAL\n", bp, ATA_CTRL(dev));
+		return berror(bp,0,EINVAL);
+	}
+
 	if ((u32_t)(bp->b_bcount >> 9) == 0) {
 		ATADEBUG(1, "ata: 0 length i/o\n");
 		return berror(bp,0,EINVAL);
