@@ -889,10 +889,12 @@ ata_pushreq(ata_ctrl_t *ac, ata_req_t *r)
     s = splbio();
     ide_q_put(ac, r);
 
+#if EXTRA_KICK_FOR_INTR_MODE
 	/* huh? ide_q_put should kick if necessary, and either way this doesn't
 	   most code avoid calling this in spl? */
-    /* if (AC_HAS_FLAG(ac, ACF_INTR_MODE) || !AC_HAS_FLAG(ac, ACF_POLL_RUNNING))
-          ide_kick(ac); */
+    if (AC_HAS_FLAG(ac, ACF_INTR_MODE) || !AC_HAS_FLAG(ac, ACF_POLL_RUNNING))
+          ide_kick(ac);
+#endif
 
     splx(s);
 

@@ -63,6 +63,10 @@
 #define DEBUG_INDIVIDUAL_IOS 0
 #define DEBUG_BUF_DATA_WORDS 0
 #define COMPILE_OUT_ATADEBUG 1
+/* There is a mismatch between between what's being closed (one dev) and what io is ignored for (whole controller), so disabled for now */
+#define IGNORE_IO_WHILE_CLOSING 0
+/* Let's try this on real hardware */
+#define EXTRA_KICK_FOR_INTR_MODE 1
 
 #if DEBUG_HIGH_LEVEL_OPERATIONS
 #define dbg_hilvl printf
@@ -78,6 +82,7 @@
 
 #ifdef _AIX
 #define SECTOR_LIMIT 16777216 /* 8GB */
+#define IGNORE_WHOLE_DISK_WRITES_WITHOUT_OPNWRT 1 /* This is the normal AIX behaviour, but it prevents whole disk device dd use */
 #endif
 
 #ifdef _AIX

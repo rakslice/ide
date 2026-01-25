@@ -277,10 +277,12 @@ atastrategy(struct buf *bp)
 		bp);
 #endif
 
+#if IGNORE_IO_WHILE_CLOSING
 	if (AC_HAS_FLAG(ac, ACF_CLOSING)) {
 		ATADEBUG(3, "ata: atastrategy(bp=0x%x) for ctrl %d while ctrl is closing -> EINVAL\n", bp, ATA_CTRL(dev));
 		return berror(bp,0,EINVAL);
 	}
+#endif
 
 	if ((u32_t)(bp->b_bcount >> 9) == 0) {
 		ATADEBUG(1, "ata: 0 length i/o\n");
@@ -288,6 +290,7 @@ atastrategy(struct buf *bp)
 	}
 
 #ifdef _AIX
+#if IGNORE_WHOLE_DISK_WRITES_WITHOUT_OPNWRT
 	if (ATA_IS_WHOLE_DISK_DEV(dev) && ((bp->b_flags & B_READ) == 0)) {
 		struct partition * part = partition_from_dev(dev);
 		if (!part) {
@@ -300,7 +303,8 @@ atastrategy(struct buf *bp)
 			return berror(bp,bp->b_bcount,EINVAL);
 		}
 	}
-#endif
+#endif /* IGNORE_WHOLE_DISK_WRITES_WITHOUT_OPNWRT */
+#endif /* _AIX */
 
 	ata_region_from_dev(dev,&base,&len);
 
