@@ -74,15 +74,10 @@ ATADEBUG(int lvl, char *fmt, ...)
 #ifdef _AIX
 #include <sys/minidisk.h>
 #undef drive
-void
-CopyTbl(ata_part_t *fp,struct _partition *ipart)
-{
-	fp->active   = ipart->IPL_ind;
-	fp->base_lba = (((u32_t)ipart->rel_sect_h) << 16) | (u32_t)ipart->rel_sect_l;
-	fp->nsectors = (((u32_t)ipart->num_sect_h) << 16) | (u32_t)ipart->num_sect_l;
-	fp->systid   = (int)ipart->system_ind;
-}
-#else
+#endif
+
+
+#ifndef _AIX
 void
 CopyTbl(ata_part_t *fp,struct ipart *ipart)
 {
