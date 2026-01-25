@@ -292,11 +292,12 @@ atastrategy(struct buf *bp)
 		struct partition * part = partition_from_dev(dev);
 		if (!part) {
 			ATADEBUG(1, "ata: can't access hdpart for whole disk, ctrl %d drive %d\n", ATA_CTRL(dev), ATA_DRIVE(dev));
-			return berror(bp,0,EINVAL);
+			return berror(bp,bp->b_bcount,EINVAL);
 		}
 		if ((part->p_flag & OPNWRT) == 0) {
 			ATADEBUG(3, "ata: entire disk write but write not enabled, ctrl %d drive %d\n", ATA_CTRL(dev), ATA_DRIVE(dev));
-			return berror(bp,0,EINVAL);
+			printf("ata: whole disk dev write without HDIOWRT ignored\n");
+			return berror(bp,bp->b_bcount,EINVAL);
 		}
 	}
 #endif
