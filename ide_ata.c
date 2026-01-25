@@ -147,6 +147,11 @@ ata_identify(ata_ctrl_t *ac, int drive)
 
 	/* LBA28 capacity in words 60 61 */
 	u->nsectors = ((u32_t)id[61] << 16) | (u32_t)id[60];
+#ifdef SECTOR_LIMIT
+	if (u->nsectors > SECTOR_LIMIT) {
+		u->nsectors = SECTOR_LIMIT;
+	}
+#endif
 	u->lba_ok   = (id[49] & (1<<9)) ? 1 : 0;
 	U_SET_FLAG(u,UF_PRESENT);
 	u->read_only = 0;

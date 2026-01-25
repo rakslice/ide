@@ -57,7 +57,7 @@
 #include <sys/cmn_err.h>
 #endif
 
-/* Some debug toggles */
+/* Some debug toggles and other settings */
 
 #define DEBUG_HIGH_LEVEL_OPERATIONS 0
 #define DEBUG_INDIVIDUAL_IOS 0
@@ -68,6 +68,16 @@
 #define dbg_hilvl printf
 #else
 #define dbg_hilvl(fmt, ) /* ... */
+#endif
+
+/* If SECTOR_LIMIT is defined, the number of sectors to use on the drive
+   is limited to the number in SECTOR_LIMIT if the number reported by the drive is higher.
+   This helps while dealing with stuff in the OS that simply can't handle
+   higher numbers of sectors.
+*/
+
+#ifdef _AIX
+#define SECTOR_LIMIT 16777216 /* 8GB */
 #endif
 
 #ifdef _AIX
