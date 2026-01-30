@@ -295,6 +295,8 @@ atahdinit(dev_t devno) {
     if (atahdinit_previously_called == 0) {
         atahdinit_previously_called = 1;
 
+        init_hddelayloop();
+
         /* Tweak the Space settings for our purposes */
 
         // Debug

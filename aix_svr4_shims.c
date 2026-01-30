@@ -28,11 +28,44 @@ time_t drv_usectohz(time_t microseconds) {
 
 #include <sys/time.h>
 
-#define ITERATIONS_PER_USEC 80
+int iterations_per_usec=800;
+
+#define ITERATIONS 1000000000
+
+#include <sys/systm.h>
+
+void init_hddelayloop() {
+    time_t t1, t2;
+
+    t1 = etime();
+
+    unsigned int result = 0;
+    for (unsigned int i = ITERATIONS; i >0; i--) {
+            result += i;
+    }
+
+    t2 = etime();
+
+    time_t elapsed = (t2 - t1) * usec_per_tick;
+
+
+    printf("result: %d\n", result);
+
+    printf("iterations: %d\n", ITERATIONS);
+
+    printf("start: %d\n", t1);
+    printf("end: %d\n", t2);
+    printf("elapsed: %d.%06d sec\n", elapsed / 1000000, elapsed % 1000000);
+
+    if (elapsed) {
+        printf("Iterations per usec: %d\n", ITERATIONS/elapsed);
+        iterations_per_usec = ITERATIONS/elapsed;
+    }
+}
 
 void hddelayloop(int usec) {
 	int i;
-	for (i = ITERATIONS_PER_USEC * usec; i > 0; i--);
+	for (i = iterations_per_usec * usec; i > 0; i--);
 }
 
 void drv_usecwait(time_t microseconds) {
