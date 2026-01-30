@@ -57,7 +57,9 @@
 #include <sys/cmn_err.h>
 #endif
 
+/*************************************** */
 /* Some debug toggles and other settings */
+/*************************************** */
 
 #define DEBUG_HIGH_LEVEL_OPERATIONS 0
 #define DEBUG_INDIVIDUAL_IOS 0
