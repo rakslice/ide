@@ -284,9 +284,12 @@ ata_mbstrategy_trivial(struct buf * flist) {
     splx(s);
 }
 
+#include "version.inc"
+
 void
 atahdinit(dev_t devno) {
     printf("ata: svr4 ata/atapi driver ported to aix, \n");
+    printf("ata: ver %s\n", VERSION_STR);
 	printf("ata: major %d minor %d\n", major(devno), minor(devno));
 
     if (atahdinit_previously_called == 0) {

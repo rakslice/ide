@@ -11,6 +11,8 @@ $(DEVNAME).o: $(objs)
 $(objs): ide.h aix_svr4_shims.h
 
 ide_aix.o: ID/Space.c
+	echo '#define VERSION_STR "Built on '"`date`"'"' > version.inc
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
 	-rm *.o
