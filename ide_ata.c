@@ -89,6 +89,10 @@ ata_wait(ata_ctrl_t *ac, u8_t must_set, u8_t must_clear, long usec, u8_t *st, u8
 	if (err)
 		*err = 0;
 
+	inb(ATA_ALTSTATUS_O(ac));
+	inb(ATA_ALTSTATUS_O(ac));
+	inb(ATA_ALTSTATUS_O(ac));
+
 	for (i = 0; i <= usec; ++i) {
 		s = inb(ATA_ALTSTATUS_O(ac));
 		if (((s & must_set) == must_set) && ((s & must_clear) == 0)) {
