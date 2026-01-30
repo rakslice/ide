@@ -10,6 +10,8 @@ $(DEVNAME).o: $(objs)
 
 $(objs): ide.h aix_svr4_shims.h
 
+ide_aix.o: ID/Space.c
+
 clean:
 	-rm *.o
 
