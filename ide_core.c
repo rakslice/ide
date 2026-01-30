@@ -161,6 +161,7 @@ ataopen(dev_t *devp, int flags, int otyp, cred_t *crp)
 
 ok:
 	q->open_count++;
+	// printf("ata: ctrl %d open count %d\n", ATA_CTRL(dev), q->open_count);
 	return 0;
 }
 
@@ -202,6 +203,7 @@ ataclose(dev_t dev, int flags, int otyp, cred_t *crp)
 	}
 
 	if (q->open_count > 0) q->open_count--;
+	// printf("ata: ctrl %d open count %d\n", ATA_CTRL(dev), q->open_count);
 
 	if (q->open_count == 0) {
 		if (q->xfer_buf) {
