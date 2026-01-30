@@ -46,7 +46,7 @@ ide_watchdog(caddr_t arg)
 		r, r ? r->chunk_left : -1, r ? r->sectors_left : -1);
 
 	if (q && q->cur == NULL) 
-		printf("WARNING: q->cur while command still active\n");
+		printf("WARNING: q->cur == NULL while command still active\n");
 
 	if (!r) { 
 		ac->tmo_id=0; 
