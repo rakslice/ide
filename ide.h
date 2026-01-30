@@ -69,6 +69,7 @@
 #define IGNORE_IO_WHILE_CLOSING 0
 /* Let's try this on real hardware */
 #define EXTRA_KICK_FOR_INTR_MODE 1
+#define INSCRUTABLE_EXTRA_STATUS_CHECK 1
 
 #if DEBUG_HIGH_LEVEL_OPERATIONS
 #define dbg_hilvl printf

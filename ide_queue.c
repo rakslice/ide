@@ -188,11 +188,13 @@ ide_kick_internal(ata_ctrl_t *ac)
 	AC_CLR_FLAG(ac,ACF_PENDING_KICK);
 	splx(s);
 
+#if INSCRUTABLE_EXTRA_STATUS_CHECK
 	st=inb(ATA_ALTSTATUS_O(ac));
 	if (st & ATA_SR_DRQ) {
 		AC_SET_FLAG(ac,ACF_PENDING_KICK);
 		return;
 	}
+#endif
 
         if (do_start) ide_start(ac);
 
