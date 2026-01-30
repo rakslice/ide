@@ -8,6 +8,7 @@ objs=ide_core.o ide_queue.o ide_ata.o ide_atapi.o ide_misc.o ide_aix.o aix_svr4_
 $(DEVNAME).o: $(objs)
 	ld -r -o $@ $(objs)
 
+$(objs): ide.h aix_svr4_shims.h
 
 clean:
 	-rm *.o
