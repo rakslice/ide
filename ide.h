@@ -137,10 +137,14 @@ typedef struct buf buf_t;
 #endif
 
 #ifdef _AIX
+	struct callout * ctimeout(int (*func)(), caddr_t arg, int ticks);
+
+	typedef struct callout * timeout_t;
 	#define setup_timeout(func, arg, ticks)	ctimeout(func, arg, ticks);
-	#define cancel_timeout(id)				to_cancel(id)
-	#define finish_timeout(id)				to_cancel(id)
+	#define cancel_timeout(id)				do { struct callout * co = id; if (co != 0) { to_cancel(co); } } while (0)
+	#define finish_timeout(id)				do { struct callout * co = id; if (co != 0) { to_cancel(co); } } while (0)
 #else
+	tyepdef int timeout_t;
 	#define setup_timeout(func, arg, ticks)	timeout(func, arg, ticks);
 	#define cancel_timeout(id)				untimeout(id)
 	#define finish_timeout(id)
@@ -408,7 +412,7 @@ struct ata_ctrl {
 	ata_unit_t *drive[ATA_MAX_DRIVES];
 
 	/*** watchdog/timeout ***/
-	int	tmo_id;
+	timeout_t	tmo_id;
 	int	tmo_ticks;
 
 	int	sel_drive;

@@ -16,7 +16,7 @@ ide_arm_watchdog(ata_ctrl_t *ac, int ticks)
 		ac->tmo_id = 0;
 	}
 	BUMP(ac,wd_arm);
-	ac->tmo_id = setup_timeout(ide_watchdog, (caddr_t)ac, ticks);
+	ac->tmo_id = setup_timeout((int (*)()) ide_watchdog, (caddr_t)ac, ticks);
 }
 
 void 
