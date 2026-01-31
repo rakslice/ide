@@ -284,6 +284,69 @@ ata_mbstrategy_trivial(struct buf * flist) {
     splx(s);
 }
 
+struct callout * ten_sec_tmo_id;
+
+void ten_sec_watchdog(int arg);
+
+struct callout *ctimeout (int (*func)(), caddr_t arg, int ticks);
+
+void setup_ten_sec_watchdog() {
+    ten_sec_tmo_id = setup_timeout((int (*)())&ten_sec_watchdog, 0, HZ*10);
+}
+
+void ten_sec_special(ata_ctrl_t *ac, spl_t * s) {
+    if (AC_HAS_FLAG(ac, ACF_INTR_MODE) || !AC_HAS_FLAG(ac, ACF_POLL_RUNNING)) {
+        splx(*s);
+        ide_kick(ac);
+        *s = splbio();
+    }
+}
+
+void ten_sec_watchdog(int arg) {
+    int i, show=0;
+    spl_t s;
+    finish_timeout(ten_sec_tmo_id);
+    s = splbio();
+
+    for (i = 0 ; i < ATA_MAX_CTRL ; i ++) {
+        if (AC_HAS_FLAG(&ata_ctrl[i],ACF_PRESENT)) {
+            ata_ioque_t * q = ata_ctrl[i].ioque;
+            if (q->cur || q->q_head) {
+                show = 1;
+                break;
+            }
+        }
+    }
+
+    if (show) {
+        printf("ata 10s: ");
+        for (i = 0 ; i < ATA_MAX_CTRL ; i ++) {
+
+            if (AC_HAS_FLAG(&ata_ctrl[i],ACF_PRESENT)) {
+                ata_ioque_t * q = ata_ctrl[i].ioque;
+                if (i) printf(" | ");
+                printf("%d: cur=0x%x head=0x%x", i, q->cur, q->q_head);
+            }
+
+        }
+        printf("\n");
+
+        /* if any devices have queue but not cur, try to reactivate */
+        for (i = 0 ; i < ATA_MAX_CTRL ; i ++) {
+            if (AC_HAS_FLAG(&ata_ctrl[i],ACF_PRESENT)) {
+                ata_ioque_t * q = ata_ctrl[i].ioque;
+                if((q->cur == NULL) && (q->q_head != NULL)) {
+                    printf("ata 10s: %d: weird state\n", i);
+                    ten_sec_special(&ata_ctrl[i], &s);
+                }
+            }
+        }
+    }
+
+    splx(s);
+    setup_ten_sec_watchdog();
+}
+
 #include "version.inc"
 
 void
@@ -296,6 +359,8 @@ atahdinit(dev_t devno) {
         atahdinit_previously_called = 1;
 
         init_hddelayloop();
+
+        setup_ten_sec_watchdog();
 
         /* Tweak the Space settings for our purposes */
 
