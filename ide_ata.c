@@ -727,6 +727,7 @@ ata_request(ata_ctrl_t *ac,ata_req_t *r,int arm_ticks)
 	if (arm_ticks) ide_arm_watchdog(ac,arm_ticks);
 
 	if (!AC_HAS_FLAG(ac,ACF_INTR_MODE)) ide_kick(ac);
+	return 0;
 }
 
 extern int r_alloc;
