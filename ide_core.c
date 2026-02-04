@@ -230,6 +230,8 @@ atabreakup(struct buf *bp)
 }
 #endif
 
+int r_alloc = 0;
+
 int
 atastrategy(struct buf *bp)
 {
@@ -311,6 +313,7 @@ atastrategy(struct buf *bp)
 	ata_region_from_dev(dev,&base,&len);
 
 	r = (ata_req_t *)kmem_zalloc(sizeof(*r),KM_SLEEP);
+	r_alloc += sizeof(*r);
 	if (!r) return berror(bp,0,ENOMEM);
 
 	r->is_write = (bp->b_flags & B_READ) ? 0 : 1;

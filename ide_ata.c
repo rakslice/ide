@@ -729,6 +729,8 @@ ata_request(ata_ctrl_t *ac,ata_req_t *r,int arm_ticks)
 	if (!AC_HAS_FLAG(ac,ACF_INTR_MODE)) ide_kick(ac);
 }
 
+extern int r_alloc;
+
 void 
 ata_finish_current(ata_ctrl_t *ac, int err,int place)
 {
@@ -805,7 +807,10 @@ if (bp) {
 		else     bok(bp,resid);
 	}
 
-	if (r) kmem_free((caddr_t)r,sizeof(*r));
+	if (r) {
+		kmem_free((caddr_t)r,sizeof(*r));
+		r_alloc -= sizeof(*r);
+	}
 	AC_SET_FLAG(ac,ACF_PENDING_KICK);
 }
 

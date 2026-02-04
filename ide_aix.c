@@ -302,11 +302,15 @@ void ten_sec_special(ata_ctrl_t *ac, spl_t * s) {
     }
 }
 
+extern int r_alloc;
+
 void ten_sec_watchdog(int arg) {
     int i, show=0;
     spl_t s;
     finish_timeout(ten_sec_tmo_id);
     s = splbio();
+
+    printf("ata: r_alloc %d\n", r_alloc);
 
     for (i = 0 ; i < ATA_MAX_CTRL ; i ++) {
         if (AC_HAS_FLAG(&ata_ctrl[i],ACF_PRESENT)) {
