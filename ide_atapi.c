@@ -188,7 +188,7 @@ atapi_inquiry(ata_ctrl_t *ac, u8_t drive)
 	words = (int)(avail + 1) >> 1;
 	for (i = 0; i < (int)words; i++) {
 		u16_t w = inw(ATA_DATA_O(ac));
-		if ((i<<1) < sizeof(buf)) {
+		if ((i<<1)+1 < sizeof(buf)) {
 			buf[(i<<1)+0] = CDB16_L(w);
 			buf[(i<<1)+1] = CDB16_H(w);
 		}
