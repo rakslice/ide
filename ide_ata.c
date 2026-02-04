@@ -431,8 +431,8 @@ pio_one_sector(ata_ctrl_t *ac, ata_req_t *r)
 #endif
 	r->xptr     += ATA_SECSIZE;
 	r->xfer_off += ATA_SECSIZE;
-	if (r->chunk_left >= 0)   r->chunk_left--;
-	if (r->sectors_left >= 0) r->sectors_left--;
+	if (r->chunk_left > 0)   r->chunk_left--;
+	if (r->sectors_left > 0) r->sectors_left--;
 /*	ATADEBUG(3, "pio_one_sector csum %d\n", (int)csum); */
 	ATADEBUG(3,"pio_one_sector done: xfer_off=%08x chunk_left=%d sectors_left=%d\n", r->xfer_off,r->chunk_left,r->sectors_left);
 	return 0;

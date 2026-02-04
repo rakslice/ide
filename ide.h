@@ -263,9 +263,9 @@ typedef struct buf buf_t;
 	do { \
 	(R)->xptr     += ATA_SECSIZE; \
 	(R)->xfer_off += ATA_SECSIZE; \
-	if ((R)->chunk_left >= 0) (R)->chunk_left   -= 1; \
+	if ((R)->chunk_left > 0) (R)->chunk_left   -= 1; \
 	else			  (R)->chunk_left    = 0; \
-	if ((R)->sectors_left >= 0) (R)->sectors_left -= 1; \
+	if ((R)->sectors_left > 0) (R)->sectors_left -= 1; \
 	else			    (R)->sectors_left  = 0; \
 	} while (0)
 
