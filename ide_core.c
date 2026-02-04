@@ -118,7 +118,7 @@ ataopen(dev_t *devp, int flags, int otyp, cred_t *crp)
 		rc=atapi_read_capacity(ac,drive,&blocks,&blksz);
 		if (rc != 0) {
 			if (blksz == 0) blksz = 2048;
-			if (blocks == 0) blocks = 0;
+			//if (blocks == 0) blocks = 0; // huh?
 		}
 		u->atapi_blksz=(blksz ? blksz : 2048);
 		u->atapi_blocks=blocks;
