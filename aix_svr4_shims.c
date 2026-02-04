@@ -49,12 +49,12 @@ void init_hddelayloop() {
     time_t elapsed = (t2 - t1) * usec_per_tick;
 
 
-    printf("result: %d\n", result);
+    printf("result: %u\n", result);
 
     printf("iterations: %d\n", ITERATIONS);
 
-    printf("start: %d\n", t1);
-    printf("end: %d\n", t2);
+    printf("start: %ld\n", t1);
+    printf("end: %ld\n", t2);
     printf("elapsed: %d.%06d sec\n", elapsed / 1000000, elapsed % 1000000);
 
     if (elapsed) {
