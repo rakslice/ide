@@ -921,7 +921,7 @@ ataintr(int irq)
 	st=inb(ATA_STATUS_O(ac)); /* ataintr() */
  	err=(st & (ATA_SR_ERR|ATA_SR_DWF)) ? inb(ATA_ERROR_O(ac)) : 0;
 	if (err) {
-		printf("Drive ERR:DWF, r=0x%x  st %d dwf %d\n", r, st & ATA_SR_ERR != 0, st & ATA_SR_DWF != 0);
+		printf("Drive ERR:DWF, r=0x%x  st %d dwf %d\n", r, (st & ATA_SR_ERR) != 0, (st & ATA_SR_DWF) != 0);
 	}
 
 	if (!AC_HAS_FLAG(ac, ACF_INTR_MODE)) {
