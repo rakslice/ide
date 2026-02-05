@@ -41,6 +41,9 @@ ide_watchdog(caddr_t arg)
 	u8_t 	ast, err;
 
 	finish_timeout(ac->tmo_id);
+	/* In AIX 1.x the callouts are handled in a linked list; it is very critical that we bookkeep the timeout ids correctly
+	   so that we don't double-free a callout and thereby hang the whole system in an infinite loop at the next timer interrupt */
+	ac->tmo_id=0;
 
 	ATADEBUG(3,"ide_watchdog(r=%08x chunk_left=%x sectors_left=%x)\n",
 		r, r ? r->chunk_left : -1, r ? r->sectors_left : -1);
