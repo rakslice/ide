@@ -41,4 +41,6 @@ void loopinsw(int port, unsigned short * addr, int count);
 typedef int addr_t;
 int valid_usr_range(addr_t addr, size_t bytes);
 
+typedef struct uio uio_t;
+
 #endif /* _AIX_SVR4_SHIMS_H_ */

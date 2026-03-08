@@ -7,7 +7,12 @@
 
 
 ata_unit_t ata_unit[ATA_MAX_UNITS]; /* up to 2 drives per controller */
+
+#ifndef _AIX
 extern int ata_major;
+#endif
+
+#if 0
 
 /*
  * Avoid physiock(): it overflows off_t for large devices.
@@ -37,6 +42,8 @@ ata_physio(void (*strat)(), dev_t dev, int rw, daddr_t devsize, uio_t *uiop)
 	
 	return uiophysio(strat,NULL,dev,rw,uiop);
 }
+
+#endif
 
 void
 ataprint(dev_t dev, char *str)
@@ -200,9 +207,10 @@ ataopen(dev_t *devp, int flags, int otyp, cred_t *crp)
 	     fp->slice[slice].p_size == 0) {
 		return ENXIO;
 	}
-#endif
 
 	if (!fp->vtoc_valid || fp->slice[slice].p_size == 0) return ENXIO;
+#endif
+
 ok:
 	q->open_count++;
 	return 0;
@@ -405,6 +413,8 @@ daddr_t maxb_for_dev(dev_t dev) {
 		slice = ATA_SLICE(dev);
 #endif
 	ata_unit_t *u = &ata_unit[ATA_UNIT(dev)];
+	u32_t 	blksz, bsz512;
+	daddr_t maxb;
 
 	if (!u) return 0;
 	if (!U_HAS_FLAG(u,UF_PRESENT)) return 0;
@@ -550,6 +560,7 @@ atawrite(dev_t dev, uio_t *uiop, cred_t *crp)
 #endif
 }
 
+#ifndef _AIX
 
 /*
  * Implement V_RDABS / V_WRABS using the normal queued strategy engine
@@ -641,6 +652,8 @@ static int ataioctl_gettype(ata_unit_t *u, caddr_t arg)
 		return EFAULT;
 	return 0;
 }
+
+#endif
 
 static int ataioctl_cdrom(ata_ctrl_t *ac, ata_unit_t *u, int drive,
 			  int cmd, caddr_t arg, int mode)
@@ -1006,6 +1019,8 @@ atainit(void)
 
 	ATADEBUG(1,"atainit()\n");
 
+#ifndef _AIX
+
 	/*** Defensive check to catch my forgetting to change major config
 	 * correctly in /etc/conf/cf.d/mdevic
 	 ***/
@@ -1016,6 +1031,8 @@ atainit(void)
 			getmajor(rootdev),getminor(rootdev),
 			getmajor(swapdev),getminor(swapdev));
 	}
+
+#endif
 
 	/*** Hack - we mustn't run before bio subsystem has initialised ***/
 	if (BFREELIST_FIRST.av_forw == NULL) binit();
