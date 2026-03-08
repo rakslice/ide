@@ -70,6 +70,7 @@ ata_req_t *ide_q_get(ata_ctrl_t *);
 void 	ide_q_put(ata_ctrl_t *, ata_req_t *);
 void 	ide_kick(ata_ctrl_t *);
 void 	ide_need_kick(ata_ctrl_t *);
+void 	ide_kick_internal(ata_ctrl_t *);
 
 /*** ide_ata ***/
 int 	ata_sel(ata_ctrl_t *,int, u32_t);
@@ -161,5 +162,6 @@ void 	CopyTbl(ata_part_t *,struct ipart *);
 int 	ata_pdinfo(dev_t);
 #endif
 void 	ide_poll_engine(ata_ctrl_t *);
+void 	ata_copyback_chunk_if_needed(ata_ctrl_t *, ata_req_t *);
 
 #endif /* _IDE_FUNCS_H */

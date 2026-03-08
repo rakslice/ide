@@ -7,6 +7,36 @@
 
 
 ata_unit_t ata_unit[ATA_MAX_UNITS]; /* up to 2 drives per controller */
+extern int ata_major;
+
+/*
+ * Avoid physiock(): it overflows off_t for large devices.
+ * Use sector-based bounds checking and uiophysio
+ */
+static int
+ata_physio(void (*strat)(), dev_t dev, int rw, daddr_t devsize, uio_t *uiop)
+{
+	daddr_t	off_sec, len_sec;
+	struct iovec *iov;
+	int	i;
+
+	off_sec = uiop->uio_offset >> SCTRSHFT;
+	if (off_sec >= devsize) {
+		if (off_sec > devsize || rw == B_WRITE)
+			return ENXIO;
+		return 0;
+	}
+
+	len_sec=0;
+	for(i=0, iov=uiop->uio_iov; i<uiop->uio_iovcnt; i++,iov++)
+		len_sec += (iov->iov_len+511) >> SCTRSHFT;
+
+	if (off_sec + len_sec > devsize) {
+		uiop->uio_resid = (devsize - off_sec)<<SCTRSHFT;
+	}
+	
+	return uiophysio(strat,NULL,dev,rw,uiop);
+}
 
 void
 ataprint(dev_t dev, char *str)
@@ -56,6 +86,7 @@ ataopen(dev_t *devp, int flags, int otyp, cred_t *crp)
 		ATADEBUG(2, "ataopen() controller %d not present; returning ENXIO\n", ctrl);
 		return ENXIO;
 	}
+
 	if ((u->read_only || 
 	     U_HAS_FLAG(u,UF_CDROM)) && (flags & FWRITE)) {
 			ATADEBUG(2, "ataopen() FWRITE and controller %d drive %d is a CDROM; returning EROFS\n", ctrl, drive);
@@ -77,16 +108,20 @@ ataopen(dev_t *devp, int flags, int otyp, cred_t *crp)
 
 #ifndef _AIX
 		/*** Read the partition table ***/
-		if (ata_pdinfo(ABSDEV(dev)) != 0) {
-			splx(s);
-			return ENXIO;
+		if (!U_HAS_FLAG(u,UF_ATAPI)) {
+			if (ata_pdinfo(ABSDEV(dev)) != 0) {
+				splx(s);
+				return ENXIO;
+			}
 		}
 #endif
 
     		if (q->xfer_buf == 0) {
         		q->xfer_buf = (caddr_t)kmem_zalloc(ATA_XFER_BUFSZ, KM_SLEEP);
-        		if (q->xfer_buf == 0)
+        		if (q->xfer_buf == 0) {
+				splx(s);
             			return ENOMEM;
+			}
         		q->xfer_bufsz = ATA_XFER_BUFSZ;
 			ATADEBUG(5,"%s: xfer_buf=%lx\n",Cstr(ac),q->xfer_buf);
     		}
@@ -110,7 +145,17 @@ ataopen(dev_t *devp, int flags, int otyp, cred_t *crp)
 		int	rc;
 		u32_t	blocks, blksz;
 
-		if (!U_HAS_FLAG(u,UF_HASMEDIA)) {
+		/*
+		 * Removable ATAPI devices (CDROM, ZIP/MO) can have media 
+		 * inserted after boot. Refresh the media state on each open 
+		 * unless this is a non-blocking probe (mksymdev uses 
+		 * O_NDELAY/O_NONBLOCK).
+		 */
+		if (!(flags & (O_NDELAY|O_NONBLOCK))) {
+			(void)atapi_test_unit_ready(ac, ATA_DRIVE(dev));
+		}
+		if (!U_HAS_FLAG(u,UF_HASMEDIA) && 
+		    !(flags & (O_NDELAY|O_NONBLOCK))) {
 			printf("No media in drive\n");
 			return ENXIO;
 		}
@@ -149,9 +194,7 @@ ataopen(dev_t *devp, int flags, int otyp, cred_t *crp)
 		return ENXIO;
 	}
 
-	if (slice < 0 || slice > ATA_NPART-1) {
-		return ENXIO;
-	}
+	if (slice < 0 || slice > ATA_NPART-1) return ENXIO;
 
 	if (!fp->vtoc_valid || 
 	     fp->slice[slice].p_size == 0) {
@@ -159,6 +202,7 @@ ataopen(dev_t *devp, int flags, int otyp, cred_t *crp)
 	}
 #endif
 
+	if (!fp->vtoc_valid || fp->slice[slice].p_size == 0) return ENXIO;
 ok:
 	q->open_count++;
 	return 0;
@@ -211,7 +255,6 @@ ataclose(dev_t dev, int flags, int otyp, cred_t *crp)
 			q->xfer_buf  = 0;
 			q->xfer_bufsz = 0;
 		}
-		u->fdisk_valid=0;
 		reset_queue(ac,0);
 	}
 	AC_CLR_FLAG(ac,ACF_CLOSING);
@@ -224,6 +267,7 @@ ataclose(dev_t dev, int flags, int otyp, cred_t *crp)
 void
 atabreakup(struct buf *bp)
 {
+	ATADEBUG(1,"atabreakup(%s)\n",Dstr(bp->b_edev));
 	pio_breakup(atastrategy, bp, MAXNBLKS);
 }
 #endif
@@ -318,13 +362,25 @@ atastrategy(struct buf *bp)
 	r->bp 	    = bp;
 
 	if (U_HAS_FLAG(u,UF_ATAPI)) {
-		u32_t blksz = u->atapi_blksz ? u->atapi_blksz : 2048;
-		u32_t bsz512 = blksz >> 9;
+		u32_t 	blksz, bsz512;
+		u32_t	blkno512, lba512;
+
+		blksz = (u && u->atapi_blksz) ? u->atapi_blksz 
+					      : (u && u->lbsize) ? u->lbsize
+								 : 2048;
+
+		bsz512 = blksz >> 9;
 		if (bsz512 == 0) bsz512=1;
 
-		r->lba          = base / bsz512 + (u32_t)bp->b_blkno / bsz512;
+		blkno512 = (u32_t)bp->b_blkno;
+		lba512 = base + blkno512;
+
+		r->lba          = lba512 / bsz512;
 		r->lba_cur      = r->lba;
-		r->nsec         = (u32_t)(bp->b_bcount / blksz);
+
+		r->nsec         = (u32_t)((bp->b_bcount+blksz-1) / blksz);
+		if (r->nsec == 0 && bp->b_bcount != 0) r->nsec=1;
+
 		r->sectors_left = r->nsec;
 		r->cmd		= ATA_CMD_PACKET;
 		r->atapi_phase	= ATAPI_PHASE_WAIT_PKT_DRQ;
@@ -349,9 +405,6 @@ daddr_t maxb_for_dev(dev_t dev) {
 		slice = ATA_SLICE(dev);
 #endif
 	ata_unit_t *u = &ata_unit[ATA_UNIT(dev)];
-	daddr_t	maxb;
-	u32_t	blksz;
-	u32_t	bsz512;
 
 	if (!u) return 0;
 	if (!U_HAS_FLAG(u,UF_PRESENT)) return 0;
@@ -438,10 +491,24 @@ ataread(dev_t dev, struct uio *uiop, cred_t *crp)
 			B_READ,
 			ata_minphys);
 #endif
+
+/* The new ata_physio version */
+#if 0
+	daddr_t devsize;
+
+	devsize = (daddr_t)u->fd[fdisk].slice[slice].p_size;
+	if (devsize == 0)
+		devsize = (daddr_t)u->nsectors;
+
+	ATADEBUG(1,"ataread(%s)\n",Dstr(dev));
+
+	return ata_physio(atabreakup, dev, B_READ, devsize, uiop);
+#endif
 }
 
+
 int
-atawrite(dev_t dev, struct uio *uiop, cred_t *crp)
+atawrite(dev_t dev, uio_t *uiop, cred_t *crp)
 {
 	//printf("ata: atawrite\n");
 	ATADEBUG(1,"atawrite(%s)\n",Dstr(dev));
@@ -464,7 +531,247 @@ atawrite(dev_t dev, struct uio *uiop, cred_t *crp)
 			B_WRITE,
 			ata_minphys);
 #endif
+
+/* The new ata_physio version */
+#if 0
+	int 	fdisk = ATA_PART(dev),
+		slice = ATA_SLICE(dev);
+	ata_unit_t *u = &ata_unit[ATA_UNIT(dev)];
+
+	daddr_t devsize;
+
+	devsize = (daddr_t)u->fd[fdisk].slice[slice].p_size;
+	if (devsize == 0)
+		devsize = (daddr_t)u->nsectors;
+
+	ATADEBUG(1,"atawrite(%s)\n",Dstr(dev));
+
+	return ata_physio(atabreakup, dev, B_WRITE, devsize, uiop);
+#endif
 }
+
+
+/*
+ * Implement V_RDABS / V_WRABS using the normal queued strategy engine
+ * This ensures interrupts always have a current request and avoids
+ * special polled-command paths from ioctl context
+ */
+static int ataioctl_rdwrabs(dev_t dev, ata_unit_t *u, caddr_t arg, int rw)
+{
+	struct absio ab;
+	struct buf *bp;
+	dev_t 	adev;
+	u32_t 	blksz;
+	int	rc;
+
+	if (copyin(arg, (caddr_t)&ab, sizeof(ab)) != 0)
+		return EFAULT;
+	if (ab.abs_buf == 0)
+		return EINVAL;
+
+	/*
+	 * ABS ioctls are defined in 512-byte sectors
+	 * Reject ATAPI devices with a logical block size != 512
+	 */
+	if (U_HAS_FLAG(u,UF_ATAPI)) {
+		blksz = (u && u->atapi_blksz) ? u->atapi_blksz : 2048;
+		if (blksz != ATA_SECSIZE)
+			return EINVAL;
+	}
+
+	if (!(bp = geteblk()))
+		return EIO;
+
+	bp->b_dev	= dev;
+	bp->b_edev	= dev;
+	bp->b_error	= 0;
+	bp->b_resid	= 0;
+	bp->b_flags	= ((rw == B_WRITE) ? B_WRITE : B_READ) | B_BUSY;
+	bp->b_blkno	= (daddr_t)ab.abs_sec;
+	bp->b_bcount	= ATA_SECSIZE;
+
+	/*
+	 * For writes, stage the users 512 byte sector into the kernel buffer,
+	 * (RDABS/WRABS alway operate in 512 byte sectors)
+	 */
+	if (rw == B_WRITE) {
+		if (copyin((caddr_t)ab.abs_buf, bp->b_un.b_addr,ATA_SECSIZE) != 0) {
+			brelse(bp);
+			return EFAULT;
+		}
+	}
+
+	atastrategy(bp);
+	iowait(bp);
+
+	rc = (bp->b_flags & B_ERROR) ? (bp->b_error ? bp->b_error : EIO) : 0;
+	if (rc == 0 && rw == B_READ) {
+		if (copyout(bp->b_un.b_addr, 
+			    (caddr_t)ab.abs_buf, ATA_SECSIZE) != 0)
+			rc = EFAULT;
+	}
+	brelse(bp);
+	return rc;
+}
+
+static int ataioctl_verify(ata_unit_t *u, caddr_t arg)
+{
+	union vfy_io vfy;
+
+	vfy.vfy_out.err_code = 0;
+	if (copyout((caddr_t)&vfy, arg, sizeof(vfy)) < 0)
+		return EFAULT;
+	return 0;
+}
+
+static int ataioctl_gettype(ata_unit_t *u, caddr_t arg)
+{
+	struct v_gettype gt;
+
+	gt.flags = u->flags & UF_USER_MASK;
+	gt.model[0] = '0';
+	strncpy(gt.model, u->model, sizeof(gt.model) - 1);
+	gt.model[sizeof(gt.model) - 1] = 0;
+	strncpy(gt.product, u->product, sizeof(gt.product) - 1);
+	gt.product[sizeof(gt.product) - 1] = 0;
+	strncpy(gt.vendor, u->vendor, sizeof(gt.vendor) - 1);
+	gt.vendor[sizeof(gt.vendor) - 1] = 0;
+
+	if (copyout((caddr_t)&gt, arg, sizeof(gt)) != 0)
+		return EFAULT;
+	return 0;
+}
+
+static int ataioctl_cdrom(ata_ctrl_t *ac, ata_unit_t *u, int drive,
+			  int cmd, caddr_t arg, int mode)
+{
+	/* mode currently unused, keep for symmetry/compat */
+	(void)mode;
+
+	switch (cmd) {
+	case CDIOC_READTOC: {
+			cd_toc_io_t tio;
+			u8_t tocbuf[4096];
+			int rc;
+			ushort maxlen, actual, dlen;
+	
+			if (!U_HAS_FLAG(u,UF_ATAPI) || !U_HAS_FLAG(u,UF_CDROM))
+				return ENOTTY;
+	
+			if (copyin(arg, (caddr_t)&tio, sizeof(tio)) != 0)
+				return EFAULT;
+	
+			maxlen = tio.toc_len;
+			if (maxlen == 0 || maxlen > sizeof(tocbuf))
+				maxlen = sizeof(tocbuf);
+	
+			rc = atapi_read_toc(ac, (u8_t)drive,
+					 (int)tio.msf,
+					 tio.format,
+					 tio.track,
+					 tocbuf, maxlen);
+			if (rc != 0)
+				return EIO;
+	
+			/* TOC length is stored in first two bytes (big-endian). */
+			dlen = (tocbuf[0] << 8) | tocbuf[1];
+			/* Total bytes available = dlen + 2 header bytes. */
+			actual = dlen + 2;
+			if (actual > maxlen)
+				actual = maxlen;
+	
+			if (copyout((caddr_t)tocbuf, (caddr_t)tio.toc_buf, actual) != 0)
+				return EFAULT;
+	
+			/* Return actual length to caller. */
+			tio.toc_len = actual;
+			if (copyout((caddr_t)&tio, arg, sizeof(tio)) != 0)
+				return EFAULT;
+	
+			return 0;
+		}
+	
+		case CDIOC_PLAYMSF: {
+			cd_msf_io_t msf;
+	
+			if (!U_HAS_FLAG(u,UF_ATAPI) || !U_HAS_FLAG(u,UF_CDROM))
+				return ENOTTY;
+	
+			if (copyin(arg, (caddr_t)&msf, sizeof(msf)) != 0)
+				return EFAULT;
+	
+			if (atapi_play_audio_msf(ac, (u8_t)drive,
+					 msf.start_m, msf.start_s, msf.start_f,
+					 msf.end_m,   msf.end_s,   msf.end_f) != 0)
+				return EIO;
+	
+			return 0;
+		}
+	
+	
+		case CDIOC_PAUSE: {
+			if (!U_HAS_FLAG(u,UF_ATAPI) || !U_HAS_FLAG(u,UF_CDROM))
+				return ENOTTY;
+	
+			if (atapi_pause_resume(ac, (u8_t)drive, 0) != 0)
+				return EIO;
+	
+			return 0;
+		}
+	
+		case CDIOC_RESUME: {
+			if (!U_HAS_FLAG(u,UF_ATAPI) || !U_HAS_FLAG(u,UF_CDROM))
+				return ENOTTY;
+	
+			if (atapi_pause_resume(ac, (u8_t)drive, 1) != 0)
+				return EIO;
+	
+			return 0;
+		}
+	
+		case CDIOC_EJECT: {
+			if (!U_HAS_FLAG(u,UF_ATAPI) || !U_HAS_FLAG(u,UF_CDROM))
+				return ENOTTY;
+	
+			/* LoEj=1, Start=0 -> eject / tray open */
+			if (atapi_start_stop(ac, (u8_t)drive, 0, 1) != 0)
+				return EIO;
+	
+			return 0;
+		}
+	
+		case CDIOC_LOAD: {
+			if (!U_HAS_FLAG(u,UF_ATAPI) || !U_HAS_FLAG(u,UF_CDROM))
+				return ENOTTY;
+	
+			/* LoEj=1, Start=1 -> load / tray close and spin up */
+			if (atapi_start_stop(ac, (u8_t)drive, 1, 1) != 0)
+				return EIO;
+	
+			return 0;
+		}
+	
+		case CDIOC_SUBCHANNEL: {
+			cd_subchnl_io_t sci;
+	
+			if (!U_HAS_FLAG(u,UF_ATAPI) || !U_HAS_FLAG(u,UF_CDROM))
+				return ENOTTY;
+	
+			if (atapi_read_subchnl(ac, (u8_t)drive, 1, &sci) != 0)
+				return EIO;
+	
+			if (copyout((caddr_t)&sci, (caddr_t)arg, sizeof(sci)) != 0)
+				return EFAULT;
+		
+			return 0;
+		}
+	
+
+	default:
+		return ENOTTY;
+	}
+}
+
 
 int
 ataioctl(dev_t dev, int cmd, caddr_t arg, int mode, cred_t *crp, int *rvalp)
@@ -505,7 +812,6 @@ ataioctl(dev_t dev, int cmd, caddr_t arg, int mode, cred_t *crp, int *rvalp)
 		dp.dp_secsiz = DEV_BSIZE;
 		dp.dp_ptag   = 0;
 		dp.dp_pflag  = 0;
-		/*dp.dp_pstartsec = 0;*/
 		dp.dp_pstartsec = 1;
 		dp.dp_pnumsec  = u->nsectors;
 
@@ -525,61 +831,20 @@ ataioctl(dev_t dev, int cmd, caddr_t arg, int mode, cred_t *crp, int *rvalp)
 		return 0;
 	    }
 	
-	case V_RDABS: {		/* VIOC | 0x0A */
-        	struct absio ab;
-		caddr_t	ptr;
+	case V_RDABS:		/* VIOC | 0x0A */
+		return ataioctl_rdwrabs(ABSDEV(dev), u, arg, B_READ);
 
-		printf("copyin\n");
-        	if (copyin(arg, (caddr_t)&ab, sizeof(ab)) != 0) return EFAULT;
-        	if (ab.abs_buf == 0) return EINVAL;
-
-		if (!(ptr = (caddr_t)kmem_alloc(ATA_SECSIZE,KM_SLEEP))) {
-			return ENOMEM;
-		}
-		printf("call ata_getblock(%d)\n",ab.abs_sec);
-    		if (ata_getblock(ABSDEV(dev),ab.abs_sec,ptr,ATA_SECSIZE)) {
-			kmem_free(ptr,ATA_SECSIZE);
-			return EFAULT;
-		}
-		printf("call copyout()\n");
-                if (copyout(ptr,ab.abs_buf,ATA_SECSIZE) != 0) {
-			kmem_free(ptr,ATA_SECSIZE);
-			return EFAULT; 
-		}
-		kmem_free(ptr,ATA_SECSIZE);
-                return 0;
-	    }
 	
-	case V_WRABS: {		/* VIOC | 0x0B */
-        	struct absio ab;
-		caddr_t	ptr;
+	case V_WRABS:		/* VIOC | 0x0B */
+		return ataioctl_rdwrabs(ABSDEV(dev), u, arg, B_WRITE);
 
-        	if (copyin(arg,(caddr_t)&ab,sizeof(ab)) != 0) return EFAULT;
-        	if (ab.abs_buf == 0) return EINVAL;
 
-		if (!(ptr = (caddr_t)kmem_alloc(ATA_SECSIZE,KM_SLEEP))) {
-			return ENOMEM;
-		}
-                if (copyin((caddr_t)ab.abs_buf,ptr,ATA_SECSIZE) != 0) { 
-			kmem_free(ptr,ATA_SECSIZE);
-			return EFAULT; 
-		} 
-    		if (ata_putblock(ABSDEV(dev),ab.abs_sec,ptr,ATA_SECSIZE) != 0) {
-			kmem_free(ptr,ATA_SECSIZE);
-			return EIO;
-		}
-		kmem_free(ptr,ATA_SECSIZE);
-                return 0;
-	    }
+	case V_VERIFY:		/* VIOC | 0x0C */
+		return ataioctl_verify(u, arg);
 
-	case V_VERIFY: {	/* VIOC | 0x0C */
-    		union vfy_io vfy;
 
-		vfy.vfy_out.err_code=0;
-		if (copyout((caddr_t)&vfy,arg,sizeof(vfy)) < 0)
-			return EFAULT;
-		return 0;
-	    }
+	case V_GETTYPE:
+		return ataioctl_gettype(u, arg);
 
 	case V_GETTYPE: {
 		struct v_gettype gt;
@@ -658,130 +923,36 @@ ataioctl(dev_t dev, int cmd, caddr_t arg, int mode, cred_t *crp, int *rvalp)
 #endif
 
 	/* --- Private ATAPI CD-ROM TOC / audio controls --- */
-	case CDIOC_READTOC: {
-		cd_toc_io_t tio;
-		u8_t * tocbuf = (u8_t *)kmem_alloc(4096, KM_SLEEP);
-		int rc;
-		int out;
-		ushort maxlen, actual, dlen;
-		if (tocbuf == NULL)
-			return EFAULT;
-
-		if (!U_HAS_FLAG(u,UF_ATAPI) || !U_HAS_FLAG(u,UF_CDROM))
-			{ out = ENOTTY; goto cd_readtoc_done; }
-
-		if (copyin(arg, (caddr_t)&tio, sizeof(tio)) != 0)
-			{ out = EFAULT; goto cd_readtoc_done; }
-
-		maxlen = tio.toc_len;
-		if (maxlen == 0 || maxlen > sizeof(tocbuf))
-			maxlen = sizeof(tocbuf);
-
-		rc = atapi_read_toc(ac, (u8_t)drive,
-				 (int)tio.msf,
-				 tio.format,
-				 tio.track,
-				 tocbuf, maxlen);
-		if (rc != 0)
-			{ out = EIO; goto cd_readtoc_done; }
-		/* TOC length is stored in first two bytes (big-endian). */
-		dlen = (tocbuf[0] << 8) | tocbuf[1];
-		/* Total bytes available = dlen + 2 header bytes. */
-		actual = dlen + 2;
-		if (actual > maxlen)
-			actual = maxlen;
-
-		if (copyout((caddr_t)tocbuf, (caddr_t)tio.toc_buf, actual) != 0)
-			{ out = EFAULT; goto cd_readtoc_done; }
-
-		/* Return actual length to caller. */
-		tio.toc_len = actual;
-		if (copyout((caddr_t)&tio, arg, sizeof(tio)) != 0)
-			{ out = EFAULT; goto cd_readtoc_done; }
-
-		out = 0;
-cd_readtoc_done:
-		if (tocbuf) kmem_free((caddr_t)tocbuf, 4096);
-		return out;
-	}
-
-	case CDIOC_PLAYMSF: {
-		cd_msf_io_t msf;
-
-		if (!U_HAS_FLAG(u,UF_ATAPI) || !U_HAS_FLAG(u,UF_CDROM))
-			return ENOTTY;
-
-		if (copyin(arg, (caddr_t)&msf, sizeof(msf)) != 0)
-			return EFAULT;
-
-		if (atapi_play_audio_msf(ac, (u8_t)drive,
-				 msf.start_m, msf.start_s, msf.start_f,
-				 msf.end_m,   msf.end_s,   msf.end_f) != 0)
-			return EIO;
-
-		return 0;
-	}
+	case CDIOC_READTOC:
+		return ataioctl_cdrom(ac, u, drive, cmd, arg, mode);
 
 
-	case CDIOC_PAUSE: {
-		if (!U_HAS_FLAG(u,UF_ATAPI) || !U_HAS_FLAG(u,UF_CDROM))
-			return ENOTTY;
+	case CDIOC_PLAYMSF:
+		return ataioctl_cdrom(ac, u, drive, cmd, arg, mode);
 
-		if (atapi_pause_resume(ac, (u8_t)drive, 0) != 0)
-			return EIO;
 
-		return 0;
-	}
+	case CDIOC_PAUSE:
+		return ataioctl_cdrom(ac, u, drive, cmd, arg, mode);
 
-	case CDIOC_RESUME: {
-		if (!U_HAS_FLAG(u,UF_ATAPI) || !U_HAS_FLAG(u,UF_CDROM))
-			return ENOTTY;
 
-		if (atapi_pause_resume(ac, (u8_t)drive, 1) != 0)
-			return EIO;
+	case CDIOC_RESUME:
+		return ataioctl_cdrom(ac, u, drive, cmd, arg, mode);
 
-		return 0;
-	}
 
-	case CDIOC_EJECT: {
-		if (!U_HAS_FLAG(u,UF_ATAPI) || !U_HAS_FLAG(u,UF_CDROM))
-			return ENOTTY;
+	case CDIOC_EJECT:
+		return ataioctl_cdrom(ac, u, drive, cmd, arg, mode);
 
-		/* LoEj=1, Start=0 -> eject / tray open */
-		if (atapi_start_stop(ac, (u8_t)drive, 0, 1) != 0)
-			return EIO;
 
-		return 0;
-	}
+	case CDIOC_LOAD:
+		return ataioctl_cdrom(ac, u, drive, cmd, arg, mode);
 
-	case CDIOC_LOAD: {
-		if (!U_HAS_FLAG(u,UF_ATAPI) || !U_HAS_FLAG(u,UF_CDROM))
-			return ENOTTY;
 
-		/* LoEj=1, Start=1 -> load / tray close and spin up */
-		if (atapi_start_stop(ac, (u8_t)drive, 1, 1) != 0)
-			return EIO;
+	case CDIOC_SUBCHANNEL:
+		return ataioctl_cdrom(ac, u, drive, cmd, arg, mode);
 
-		return 0;
-	}
-
-	case CDIOC_SUBCHANNEL: {
-		cd_subchnl_io_t sci;
-
-		if (!U_HAS_FLAG(u,UF_ATAPI) || !U_HAS_FLAG(u,UF_CDROM))
-			return ENOTTY;
-
-		if (atapi_read_subchnl(ac, (u8_t)drive, 1, &sci) != 0)
-			return EIO;
-
-		if (copyout((caddr_t)&sci, (caddr_t)arg, sizeof(sci)) != 0)
-			return EFAULT;
-	
-		return 0;
-	}
 
 	default:
-		printf("Unknown IOCTL %x\n",cmd);
+		printf("Unknown IOCTL 0x%x\n",cmd);
 		return ENOTTY;
 	}
 }
@@ -834,6 +1005,17 @@ atainit(void)
 	ata_counters_t *counters;
 
 	ATADEBUG(1,"atainit()\n");
+
+	/*** Defensive check to catch my forgetting to change major config
+	 * correctly in /etc/conf/cf.d/mdevic
+	 ***/
+	if (ata_major != 0) {
+		printf("ATA: %s ata_major=%d rootdev=(maj=%d,min=%d) swapdev=(maj=%d,min=%d)\n\n",
+			(ata_major != 0) ? "WARNING" : "",
+			ata_major,
+			getmajor(rootdev),getminor(rootdev),
+			getmajor(swapdev),getminor(swapdev));
+	}
 
 	/*** Hack - we mustn't run before bio subsystem has initialised ***/
 	if (BFREELIST_FIRST.av_forw == NULL) binit();
@@ -888,7 +1070,7 @@ atafindctrl(int irq)
 		ac=&ata_ctrl[ctrl];
 		if (ac->irq == irq && AC_HAS_FLAG(ac,ACF_PRESENT)) return ac;
 	}
-	return DDI_INTR_UNCLAIMED;
+	return NULL;
 }
 
 /* ---------- interrupt handler (ATA PIO, per-sector handshakes) ---------- */
@@ -925,6 +1107,12 @@ ataintr(int irq)
 	}
 
 	if (!r) { 
+		if (ac->lc.cmd == ATA_CMD_FLUSH_CACHE ||
+		    ac->lc.cmd == ATA_CMD_FLUSH_CACHE_EXT) {
+			BUMP(ac,irq_flush);
+			return DDI_INTR_CLAIMED;
+		}
+
 		ast=inb(ATA_ALTSTATUS_O(ac));
 		drvs=inb(ATA_DRVHD_O(ac));
 		u = ac->drive[ (drvs & ATA_DH_DRV) ? 1 : 0 ];
