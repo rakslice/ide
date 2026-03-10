@@ -281,6 +281,9 @@ ata_softreset_ctrl(ata_ctrl_t *ac)
 	 * don't accidentally run against drive 0.
 	 */
 	if (saved_drive >= 0) {
+		/* Wait for not-BSY */
+		ata_wait(ac, 0, ATA_SR_BSY, 500000L, 0, 0);
+
 		drvhd = ATA_DH((u8_t)saved_drive,
 			(saved_mode == SEL_LBA28) ? 1 : 0,
 			saved_hi4);

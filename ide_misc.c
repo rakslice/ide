@@ -338,6 +338,9 @@ ata_read_signature(ata_ctrl_t *ac, u8_t drive,u16_t *type)
 
 	ata_softreset_ctrl(ac);
 
+	/* Wait for not-BSY */
+	if (ata_wait(ac, 0, ATA_SR_BSY, 500000L, 0, 0) != 0) return EIO;
+
 	if (ata_sel(ac,drive,0) != 0) return EIO;
 
 	/*** Send an CMD_IDENTIFY to force the signature info on the bus ***/
